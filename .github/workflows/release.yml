@@ -28,9 +28,14 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --onedir --windowed --name QuanLyBenhNhanTHA --distpath dist --workpath build app.py
 
-      - name: Zip build output
+      - name: Zip build output (ban portable, cau truc phang)
         run: |
-          Compress-Archive -Path dist\QuanLyBenhNhanTHA -DestinationPath QuanLyBenhNhanTHA-${{ github.ref_name }}.zip
+          Compress-Archive -Path dist\QuanLyBenhNhanTHA\* -DestinationPath QuanLyBenhNhanTHA-${{ github.ref_name }}.zip
+
+      - name: Build installer (Setup.exe) voi Inno Setup
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=$version setup.iss
 
       - name: Create GitHub Release
         env:
@@ -38,5 +43,6 @@ jobs:
         run: |
           gh release create ${{ github.ref_name }} `
             "QuanLyBenhNhanTHA-${{ github.ref_name }}.zip" `
+            "setup_output\QuanLyBenhNhanTHA-Setup-*.exe" `
             --title "QuanLyBenhNhanTHA ${{ github.ref_name }}" `
-            --notes "Ban cap nhat duoc build tu dong boi GitHub Actions tu commit ${{ github.sha }}."
+            --notes "Ban cap nhat duoc build tu dong boi GitHub Actions tu commit ${{ github.sha }}.`n`n- **QuanLyBenhNhanTHA-Setup-*.exe**: file cai dat, dung cho lan dau tien tren may moi (khuyen nghi).`n- **QuanLyBenhNhanTHA-*.zip**: ban portable, giai nen la chay duoc, dung de tu cap nhat thu cong neu can."

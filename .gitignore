@@ -13,6 +13,7 @@ update_token.txt
 # Build artifacts
 build/
 dist/
+setup_output/
 *.spec
 __pycache__/
 *.pyc

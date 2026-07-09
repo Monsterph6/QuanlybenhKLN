@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # Cap nhat QuanLyBenhNhanTHA len ban moi nhat tu GitHub Releases (repo private).
 # Khong dung Python/git tren may dich - chi can PowerShell (co san tren Windows).
+# Script nay nam CUNG thu muc voi QuanLyBenhNhanTHA.exe va tu cap nhat tai cho.
 
 $ErrorActionPreference = "Stop"
 
@@ -10,18 +11,30 @@ $GITHUB_REPO  = "quanlybenhnhantha"
 $root        = $PSScriptRoot
 $versionFile = Join-Path $root "VERSION.txt"
 $tokenFile   = Join-Path $root "update_token.txt"
-$exeDir      = Join-Path $root "QuanLyBenhNhanTHA"
-$exePath     = Join-Path $exeDir "QuanLyBenhNhanTHA.exe"
+$exePath     = Join-Path $root "QuanLyBenhNhanTHA.exe"
+$internalDir = Join-Path $root "_internal"
 
 function Write-Info($msg)  { Write-Host $msg -ForegroundColor Cyan }
 function Write-Ok($msg)    { Write-Host $msg -ForegroundColor Green }
 function Write-Warn2($msg) { Write-Host $msg -ForegroundColor Yellow }
 function Write-Err2($msg)  { Write-Host $msg -ForegroundColor Red }
 
+# --- Dam bao ung dung dang khong chay (khong the ghi de file .exe/.dll dang mo) ---
+$running = Get-Process -Name "QuanLyBenhNhanTHA" -ErrorAction SilentlyContinue
+if ($running) {
+    Write-Warn2 "Ung dung dang chay. Vui long dong QuanLyBenhNhanTHA.exe truoc khi cap nhat."
+    Read-Host "Dong ung dung xong, nhan Enter de tiep tuc (hoac Ctrl+C de huy)"
+    $running = Get-Process -Name "QuanLyBenhNhanTHA" -ErrorAction SilentlyContinue
+    if ($running) {
+        Write-Err2 "Ung dung van dang chay. Huy cap nhat."
+        exit 1
+    }
+}
+
 # --- Lay token (repo private can Personal Access Token de tai duoc) ---
 if (-not (Test-Path $tokenFile)) {
     Write-Warn2 "Chua co token GitHub de tai ban cap nhat (repo o che do private)."
-    Write-Host "Xem huong dan lay token trong README_MAY_DICH.md, muc 'Lay Personal Access Token'."
+    Write-Host "Xem huong dan lay token trong README.md, muc 'Lay Personal Access Token'."
     $token = Read-Host "Dan Personal Access Token vao day roi Enter (token se duoc luu lai cho lan sau)"
     if ([string]::IsNullOrWhiteSpace($token)) {
         Write-Err2 "Chua nhap token. Huy cap nhat."
@@ -62,7 +75,7 @@ if ($remoteVersion -eq $localVersion) {
     exit 0
 }
 
-# --- Tim file .exe (zip) dinh kem trong Release ---
+# --- Tim file .zip dinh kem trong Release (ban portable, khong phai Setup.exe) ---
 $asset = $release.assets | Where-Object { $_.name -like "*.zip" } | Select-Object -First 1
 if (-not $asset) {
     Write-Err2 "Khong tim thay file dinh kem (.zip) trong Release '$($release.tag_name)'."
@@ -82,16 +95,18 @@ $tmpExtract = Join-Path $env:TEMP "QuanLyBenhNhanTHA-update-extract"
 if (Test-Path $tmpExtract) { Remove-Item $tmpExtract -Recurse -Force }
 Expand-Archive -Path $tmpZip -DestinationPath $tmpExtract -Force
 
-# Zip co the giai nen ra 1 thu muc con (vd QuanLyBenhNhanTHA/) hoac ngay tai goc
-$srcDir = $tmpExtract
-$inner = Join-Path $tmpExtract "QuanLyBenhNhanTHA"
-if (Test-Path $inner) { $srcDir = $inner }
+$newExe = Join-Path $tmpExtract "QuanLyBenhNhanTHA.exe"
+$newInternal = Join-Path $tmpExtract "_internal"
+if (-not (Test-Path $newExe) -or -not (Test-Path $newInternal)) {
+    Write-Err2 "File tai ve khong dung dinh dang mong doi (thieu QuanLyBenhNhanTHA.exe hoac _internal)."
+    exit 1
+}
 
 Write-Info "Dang cai dat ban moi (giu nguyen du lieu benh_nhan.db) ..."
-if (Test-Path $exeDir) {
-    Remove-Item $exeDir -Recurse -Force
-}
-Move-Item -Path $srcDir -Destination $exeDir -Force
+if (Test-Path $internalDir) { Remove-Item $internalDir -Recurse -Force }
+if (Test-Path $exePath) { Remove-Item $exePath -Force }
+Move-Item -Path $newInternal -Destination $internalDir -Force
+Move-Item -Path $newExe -Destination $exePath -Force
 
 Set-Content -Path $versionFile -Value $remoteVersion -NoNewline -Encoding utf8
 
@@ -99,4 +114,4 @@ Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue
 Remove-Item $tmpExtract -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Ok "Da cap nhat thanh cong len phien ban $remoteVersion."
-Write-Ok "Chay lai QuanLyBenhNhanTHA.exe (hoac bam Run.bat) de su dung."
+Write-Ok "Chay lai QuanLyBenhNhanTHA.exe de su dung."

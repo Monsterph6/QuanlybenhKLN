@@ -6,6 +6,7 @@ Khong phu thuoc vao thu vien giao dien - dung chung cho moi UI.
 import os
 import re
 import csv
+import sys
 import sqlite3
 import hashlib
 import datetime
@@ -15,7 +16,13 @@ try:
 except ImportError:
     openpyxl = None
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, "frozen", False):
+    # Khi da dong goi bang PyInstaller, __file__ tro vao trong thu muc _internal
+    # (bi xoa/thay the moi lan cap nhat) - phai dung thu muc chua file .exe thuc
+    # su de benh_nhan.db khong bi mat khi update.
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "benh_nhan.db")
 
 COLUMNS = [

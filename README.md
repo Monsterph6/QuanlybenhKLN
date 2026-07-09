@@ -179,46 +179,56 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 Khi tag `v*.*.*` được đẩy lên, **GitHub Actions** (`.github/workflows/release.yml`)
-tự động: build file .exe bằng PyInstaller trên máy ảo Windows của GitHub, nén
-lại thành .zip, và tạo 1 **Release** đính kèm file .zip đó. Theo dõi tiến trình
-tại tab **Actions** trên trang GitHub của repo.
+tự động: build file .exe bằng PyInstaller trên máy ảo Windows của GitHub, đóng
+gói thành **2 file** rồi tạo 1 **Release** đính kèm cả hai:
+- `QuanLyBenhNhanTHA-Setup-vX.Y.Z.exe` — file **cài đặt** (dùng Inno Setup),
+  dùng cho lần đầu tiên trên máy mới.
+- `QuanLyBenhNhanTHA-vX.Y.Z.zip` — bản **portable** (giải nén là chạy được),
+  dùng làm nguồn cho `update.bat` tự tải khi có bản mới.
+
+Theo dõi tiến trình tại tab **Actions** trên trang GitHub của repo.
 
 **3. Build thử trên máy mình (không bắt buộc, chỉ để kiểm tra trước khi tag):**
-Bấm đúp `build.bat`, hoặc chạy:
 ```
-python -m PyInstaller --noconfirm --onedir --windowed --name QuanLyBenhNhanTHA app.py
+build.bat
 ```
-Kết quả nằm ở `dist\QuanLyBenhNhanTHA\QuanLyBenhNhanTHA.exe`.
+Kết quả nằm ở `dist\QuanLyBenhNhanTHA\QuanLyBenhNhanTHA.exe`. Muốn build luôn
+file cài đặt thì cần cài [Inno Setup 6](https://jrsoftware.org/isinfo.php) rồi chạy:
+```
+"C:\Users\<ten_may>\AppData\Local\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.0.0 setup.iss
+```
+Kết quả nằm ở `setup_output\QuanLyBenhNhanTHA-Setup-1.0.0.exe`.
+
+> **Lưu ý kỹ thuật quan trọng:** khi đóng gói bằng PyInstaller, dữ liệu
+> `benh_nhan.db` phải nằm **cạnh** file `.exe`, không được nằm trong thư mục
+> `_internal` (thư mục này bị xóa và thay bằng bản mới mỗi lần `update.ps1`
+> chạy). `core.py` đã xử lý đúng việc này (dùng `sys.executable` khi chạy ở
+> dạng đã đóng gói) — nếu sau này sửa lại cách xác định `BASE_DIR`, nhớ giữ
+> đúng hành vi này để tránh mất dữ liệu người dùng khi họ bấm cập nhật.
 
 ### B. Cài đặt lần đầu trên máy đích (không cần Python)
 
-1. Vào trang Releases của repo, tải file `QuanLyBenhNhanTHA-vX.Y.Z.zip` mới nhất
-   (hoặc nhận file zip đó qua cách khác) và giải nén vào 1 thư mục bất kỳ, ví dụ
-   `D:\QuanLyBenhNhanTHA\`.
-2. Sao chép thêm 3 file từ repo vào **cùng thư mục đó** (ngang hàng với thư mục
-   `QuanLyBenhNhanTHA\` vừa giải nén): `VERSION.txt`, `update.bat`, `update.ps1`.
-   Thư mục cuối cùng sẽ có dạng:
-   ```
-   D:\QuanLyBenhNhanTHA\
-       QuanLyBenhNhanTHA\        <-- thu muc chua .exe (tu file zip)
-           QuanLyBenhNhanTHA.exe
-           _internal\...
-       VERSION.txt
-       update.bat
-       update.ps1
-   ```
-3. Chạy `QuanLyBenhNhanTHA\QuanLyBenhNhanTHA.exe` để dùng ứng dụng. Dữ liệu
-   (`benh_nhan.db`) sẽ được tạo ngay trong thư mục đó khi nhập Excel lần đầu.
+1. Vào trang Releases của repo, tải file **`QuanLyBenhNhanTHA-Setup-vX.Y.Z.exe`**
+   mới nhất.
+2. Chạy file đó, làm theo hướng dẫn (mặc định cài vào
+   `%LOCALAPPDATA%\Programs\QuanLyBenhNhanTHA`, không cần quyền Admin). Sau khi
+   cài xong có thể tick "Chạy ngay" để mở ứng dụng luôn.
+3. Bộ cài đã kèm sẵn `update.bat`, `update.ps1`, `VERSION.txt` — có shortcut
+   "Kiểm tra cập nhật" trong Start Menu. Dữ liệu (`benh_nhan.db`) được tạo ngay
+   trong thư mục cài đặt khi nhập Excel lần đầu.
 
 ### C. Cập nhật lên bản mới trên máy đích
 
-Bấm đúp `update.bat`. Lần đầu chạy sẽ hỏi **Personal Access Token** của GitHub
-(vì repo đang để **Private**) — xem cách lấy token ở mục D bên dưới. Token chỉ
-cần nhập 1 lần, được lưu vào `update_token.txt` (không chia sẻ file này cho ai).
+Mở Start Menu → "Quản lý benh nhan THA" → **Kiểm tra cập nhật** (hoặc bấm đúp
+`update.bat` trong thư mục cài đặt). Lần đầu chạy sẽ hỏi **Personal Access
+Token** của GitHub (vì repo đang để **Private**) — xem cách lấy token ở mục D
+bên dưới. Token chỉ cần nhập 1 lần, được lưu vào `update_token.txt` (không chia
+sẻ file này cho ai).
 
-`update.bat` sẽ tự so sánh phiên bản, tải bản mới nếu có, thay thế thư mục
-`QuanLyBenhNhanTHA\` bằng bản mới — **dữ liệu `benh_nhan.db` không bị ảnh hưởng**
-vì nó nằm ngoài thư mục đó.
+`update.bat` sẽ tự so sánh phiên bản, tải bản portable (.zip) mới nếu có, và
+thay thế file `.exe` + thư mục `_internal` — **dữ liệu `benh_nhan.db` không bị
+ảnh hưởng** vì nó nằm ngoài `_internal`. Nếu ứng dụng đang mở, script sẽ nhắc
+đóng lại trước khi cập nhật (Windows khóa file .exe/.dll đang chạy).
 
 ### D. Lấy Personal Access Token (chỉ cần làm 1 lần/máy, vì repo là Private)
 
