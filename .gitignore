@@ -1,0 +1,21 @@
+# Du lieu benh nhan - KHONG BAO GIO dua len git (thong tin ca nhan/y te nhay cam)
+*.xlsx
+*.xls
+*.db
+*.db-journal
+*.db.backup*
+danh_sach_*.csv
+ket_qua_truy_van.csv
+
+# Token cap nhat (bi mat, khong chia se)
+update_token.txt
+
+# Build artifacts
+build/
+dist/
+*.spec
+__pycache__/
+*.pyc
+
+# Editor
+.vscode/
