@@ -211,19 +211,31 @@ Tương tự `build.bat` của ứng dụng chính:
 ```
 build_server.bat
 ```
-Kết quả nằm ở `dist_server\QuanLyBenhNhanTHA-Service\` và
-`dist_server\QuanLyBenhNhanTHA-Tray\`. Cài dịch vụ từ bản đã đóng gói (vẫn cần
-quyền Administrator):
+Kết quả nằm gọn trong 1 thư mục `dist_server\` (gồm cả Service, Tray,
+`install_server.bat`, `uninstall_server.bat`, `update_server.bat`) — copy cả
+thư mục này sang máy chủ đích. Cài dịch vụ (vẫn cần quyền Administrator):
 ```
-QuanLyBenhNhanTHA-Service.exe --startup auto install
-QuanLyBenhNhanTHA-Service.exe start
+dist_server\install_server.bat     (chuot phai -> Run as administrator)
 ```
 
-> **Lưu ý:** phần Windows Service (`service.py`, `server_tray.py`) chỉ chạy
-> được trên Windows và cần thư viện `pywin32`/`pystray` — chưa được kiểm thử
-> trên máy Windows thật (được viết theo đúng mẫu chuẩn của pywin32/pystray và
-> đã kiểm tra cú pháp, nhưng nên tự kiểm thử kỹ trên 1 máy Windows trước khi
-> dùng cho dữ liệu bệnh nhân thật).
+### Cập nhật máy chủ lên bản mới
+
+Máy chủ có **dòng phiên bản riêng** với ứng dụng máy trạm — xem `VERSION_SERVER.txt`
+(so với `VERSION.txt` của máy trạm) và tag GitHub dạng `server-vX.Y.Z` (so với
+`vX.Y.Z` của máy trạm). Hai dòng cập nhật độc lập, không ảnh hưởng lẫn nhau.
+
+Trên máy chủ đã cài từ bản đóng gói (`dist_server\...`), chuột phải
+`update_server.bat` → **Run as administrator**. Script sẽ tự dừng dịch vụ, thay
+file Service/Tray bằng bản mới, rồi bật lại dịch vụ — dữ liệu `benh_nhan.db`,
+`lan_config.json`, `backups\` không bị ảnh hưởng. Lần đầu chạy sẽ hỏi Personal
+Access Token giống `update.bat` của máy trạm (xem mục D bên dưới) — dùng
+chung 1 token cho cả 2 vì cùng 1 repo.
+
+> **Lưu ý:** phần Windows Service (`service.py`, `server_tray.py`,
+> `update_server.ps1`) chỉ chạy được trên Windows và cần thư viện
+> `pywin32`/`pystray` — chưa được kiểm thử trên máy Windows thật (được viết
+> theo đúng mẫu chuẩn của pywin32/pystray và đã kiểm tra cú pháp, nhưng nên tự
+> kiểm thử kỹ trên 1 máy Windows trước khi dùng cho dữ liệu bệnh nhân thật).
 
 ## Cấu trúc dữ liệu trong CSDL (bảng `patients`)
 
@@ -324,6 +336,25 @@ gói thành **2 file** rồi tạo 1 **Release** đính kèm cả hai:
 
 Theo dõi tiến trình tại tab **Actions** trên trang GitHub của repo.
 
+**Riêng cho gói máy chủ** (xem mục "Máy chủ chia sẻ mạng LAN" ở trên): quy
+trình tương tự nhưng dùng file version/tag khác, để 2 dòng phiên bản độc lập
+với nhau (build/update xong máy trạm không bắt máy chủ phải cập nhật theo và
+ngược lại):
+```
+# Sua code, cap nhat so phien ban trong VERSION_SERVER.txt (vd: 0.1.1)
+git add .
+git commit -m "Mo ta thay doi"
+git push
+
+git tag server-v0.1.1
+git push origin server-v0.1.1
+```
+Tag `server-v*.*.*` kích hoạt workflow riêng
+(`.github/workflows/release-server.yml`), build `service.py` +
+`server_tray.py`, đóng gói thành `QuanLyBenhNhanTHA-Server-server-vX.Y.Z.zip`
+và tạo Release riêng — không có file cài đặt Inno Setup (chỉ có bản portable,
+cài qua `install_server.bat`/`update_server.bat` như mô tả ở mục máy chủ).
+
 **3. Build thử trên máy mình (không bắt buộc, chỉ để kiểm tra trước khi tag):**
 ```
 build.bat
@@ -370,6 +401,10 @@ thay thế file `.exe` + thư mục `_internal` — **dữ liệu `benh_nhan.db`
 (dù chỉ cần chạy `update.bat` 1 lần để nhập token), mỗi lần mở ứng dụng sẽ tự
 kiểm tra ngầm (không chặn giao diện, không lỗi nếu mất mạng) — nếu có bản mới
 hơn sẽ hiện 1 dải thông báo màu vàng ở đầu cửa sổ, nhắc chạy `update.bat`.
+
+`update.bat` chỉ kiểm tra Release của **máy trạm** (tag `vX.Y.Z`) — máy chủ có
+cơ chế cập nhật riêng (`update_server.bat`, tag `server-vX.Y.Z`), xem mục
+"Cập nhật máy chủ lên bản mới" ở trên.
 
 ### D. Lấy Personal Access Token (chỉ cần làm 1 lần/máy, vì repo là Private)
 

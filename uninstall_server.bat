@@ -13,8 +13,11 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-python service.py stop
-python service.py remove
+set SERVICE_CMD=python service.py
+if exist "%~dp0QuanLyBenhNhanTHA-Service.exe" set SERVICE_CMD="%~dp0QuanLyBenhNhanTHA-Service.exe"
+
+%SERVICE_CMD% stop
+%SERVICE_CMD% remove
 
 echo.
 echo Da dung va go cai dat dich vu.

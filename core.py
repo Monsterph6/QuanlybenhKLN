@@ -896,14 +896,22 @@ def get_update_token():
     return None
 
 
-def check_latest_release(timeout=5):
-    """Tra ve (tag_moi_nhat, html_url) tu GitHub Releases, hoac (None, None)
-    neu khong kiem tra duoc (khong mang, chua co token, repo chua co release...).
-    Khong bao gio raise loi - danh cho kiem tra nen, khong duoc lam gian doan app."""
+def check_latest_release(timeout=5, tag_prefix="v"):
+    """Tra ve (tag_moi_nhat, html_url) cua release moi nhat co tag bat dau
+    bang `tag_prefix`, hoac (None, None) neu khong kiem tra duoc (khong
+    mang, chua co token, repo chua co release phu hop...). Khong bao gio
+    raise loi - danh cho kiem tra nen, khong duoc lam gian doan app.
+
+    Ung dung may tram (app.py) va goi may chu (service.py/server_tray.py)
+    dung chung 1 repo Release nhung 2 dong phien ban tach rieng bang tien
+    to tag: "vX.Y.Z" cho may tram (tag_prefix mac dinh "v"), "server-vX.Y.Z"
+    cho may chu (goi voi tag_prefix="server-v"). Dung /releases (danh sach)
+    thay vi /releases/latest de loc dung dong phien ban can, vi
+    /releases/latest tra ve release moi nhat theo thoi gian bat ke tag nao."""
     token = get_update_token()
     if not token:
         return None, None
-    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases?per_page=20"
     req = urllib.request.Request(url, headers={
         "Accept": "application/vnd.github+json",
         "User-Agent": "QuanLyBenhNhanTHA",
@@ -911,7 +919,11 @@ def check_latest_release(timeout=5):
     })
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return data.get("tag_name"), data.get("html_url")
+            releases = json.loads(resp.read().decode("utf-8"))
+        for r in releases:
+            tag = r.get("tag_name") or ""
+            if tag.startswith(tag_prefix) and not r.get("draft") and not r.get("prerelease"):
+                return tag, r.get("html_url")
+        return None, None
     except Exception:
         return None, None

@@ -22,12 +22,15 @@ if not exist lan_config.json (
     echo.
 )
 
-echo Dang cai dat Windows Service...
-python service.py --startup auto install
+set SERVICE_CMD=python service.py
+if exist "%~dp0QuanLyBenhNhanTHA-Service.exe" set SERVICE_CMD="%~dp0QuanLyBenhNhanTHA-Service.exe"
+
+echo Dang cai dat Windows Service (%SERVICE_CMD%)...
+%SERVICE_CMD% --startup auto install
 if errorlevel 1 goto :error
 
 echo Dang bat dich vu...
-python service.py start
+%SERVICE_CMD% start
 if errorlevel 1 goto :error
 
 echo.
@@ -40,6 +43,9 @@ echo  Administrator), chay server_tray.py - se hien icon o khay he
 echo  thong. Co the them shortcut server_tray.py vao Startup de tu
 echo  mo tray moi lan dang nhap (hoac tick "Khoi dong cung Windows"
 echo  trong menu chuot phai cua icon tray).
+echo.
+echo  Kiem tra ban cap nhat cho may chu sau nay: chay update_server.bat
+echo  (chi dung duoc voi ban da dong goi .exe, xem build_server.bat).
 echo ============================================================
 pause
 exit /b 0

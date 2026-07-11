@@ -57,13 +57,22 @@ if (Test-Path $versionFile) {
 Write-Info "Phien ban hien tai: $localVersion"
 
 # --- Hoi GitHub xem ban moi nhat la gi ---
-$releaseUrl = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
+# Dung /releases (danh sach) roi tu loc tag bat dau bang "v" (vd "v1.0.2"),
+# KHONG dung /releases/latest vi repo nay co ca release cua goi may chu
+# (tag "server-vX.Y.Z") - /releases/latest se tra ve release moi nhat theo
+# thoi gian bat ke la cua may tram hay may chu, gay cap nhat nham.
+$releasesUrl = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases?per_page=20"
 try {
-    $release = Invoke-RestMethod -Uri $releaseUrl -Headers $headers
+    $releases = Invoke-RestMethod -Uri $releasesUrl -Headers $headers
 } catch {
     Write-Err2 "Khong the ket noi GitHub hoac token khong hop le / khong co quyen truy cap repo."
     Write-Err2 "Chi tiet loi: $($_.Exception.Message)"
     Write-Host "Neu token sai, xoa file update_token.txt roi chay lai de nhap token moi."
+    exit 1
+}
+$release = $releases | Where-Object { $_.tag_name -match '^v\d' -and -not $_.draft -and -not $_.prerelease } | Select-Object -First 1
+if (-not $release) {
+    Write-Err2 "Khong tim thay Release nao cho ung dung may tram (tag dang 'vX.Y.Z') trong repo."
     exit 1
 }
 
