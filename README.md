@@ -3,9 +3,12 @@
 Ứng dụng desktop offline (Python + SQLite + giao diện PyQt6) để nhập danh sách
 bệnh nhân từ Excel, lưu trữ, lọc trùng và xuất kết quả ra Excel/CSV.
 
-Mã nguồn gồm 2 file:
+Mã nguồn gồm 4 file:
 - `core.py` — tầng dữ liệu: SQLite, đọc/chuẩn hóa Excel, xuất Excel/CSV (không phụ thuộc giao diện).
 - `app.py` — giao diện PyQt6 (nhập `core.py` để xử lý dữ liệu).
+- `netserver.py` / `netclient.py` — cho phép nhiều máy trong cùng mạng LAN nội
+  bộ dùng chung 1 CSDL (xem tab "Mạng LAN" bên dưới), chỉ dùng thư viện chuẩn
+  Python, không thêm phụ thuộc mới.
 
 ## Yêu cầu
 
@@ -130,6 +133,32 @@ dưới và chạy luôn, có thể chỉnh sửa lại nếu cần trước khi
   ```
 - Xuất kết quả truy vấn ra Excel hoặc CSV bằng nút **Xuất kết quả (Excel/CSV)**.
 
+### 5. Tab "Mạng LAN"
+
+Cho phép nhiều máy trong **cùng một mạng LAN nội bộ** (ví dụ nhiều máy trong
+cùng một trạm y tế) cùng dùng chung 1 cơ sở dữ liệu `benh_nhan.db`, mà không
+cần Internet hay dịch vụ cloud nào — dữ liệu không rời khỏi mạng nội bộ.
+
+- **Một máy (mặc định)**: hoạt động độc lập như trước đây, không chia sẻ.
+- **Máy chủ**: máy giữ file `benh_nhan.db` thật. Chọn cổng (mặc định `8765`),
+  lưu cài đặt và khởi động lại — ứng dụng sẽ tự mở cổng chia sẻ mỗi khi khởi
+  động (cần luôn mở ứng dụng trên máy này trong giờ làm việc để các máy khác
+  dùng được). Tab sẽ hiện địa chỉ dạng `http://<ip>:<cổng>` để cung cấp cho
+  các máy trạm.
+- **Máy trạm**: nhập đúng địa chỉ máy chủ (bấm **Kiểm tra kết nối** để thử
+  trước), lưu cài đặt và khởi động lại. Sau đó mọi thao tác (nhập Excel, lọc
+  trùng, gộp, truy vấn SQL...) đều đọc/ghi trực tiếp vào CSDL trên máy chủ qua
+  mạng LAN — không còn dùng file `benh_nhan.db` cục bộ nữa. Nút "Sao lưu CSDL
+  ngay" / "Mở thư mục sao lưu" trên máy trạm sẽ tác động tới bản sao lưu trên
+  máy chủ.
+
+**Lưu ý bảo mật:** chế độ này hiện **không yêu cầu mật khẩu** — bất kỳ máy nào
+truy cập được vào cổng mạng của máy chủ (cùng mạng LAN) đều đọc/ghi được toàn
+bộ dữ liệu bệnh nhân, kể cả chạy được câu lệnh SQL tùy ý (tab "Truy vấn SQL" đã
+giới hạn phía máy trạm chỉ cho gõ `SELECT`, nhưng máy chủ không tự kiểm tra lại
+điều đó). Chỉ bật tính năng này trong mạng nội bộ đáng tin cậy (không có Wi-Fi
+khách lạ dùng chung), và **không** mở cổng này ra Internet qua router/port-forwarding.
+
 ## Cấu trúc dữ liệu trong CSDL (bảng `patients`)
 
 | Cột | Ý nghĩa |
@@ -163,6 +192,7 @@ từng tổ hợp tiêu chí), để tab "Lọc trùng" không hiển thị lạ
 | `backups/` | Các bản sao lưu tự động/thủ công của `benh_nhan.db` (giữ 10 bản gần nhất) |
 | `app_password.hash` | Mật khẩu bảo vệ ứng dụng đã băm (nếu đã đặt) — xóa file này để gỡ bỏ mật khẩu nếu quên |
 | `update_token.txt` | Personal Access Token GitHub dùng để kiểm tra/tải bản cập nhật (repo Private) |
+| `lan_config.json` | Cấu hình chế độ Mạng LAN của máy này (một máy / máy chủ / máy trạm), xem tab "Mạng LAN" |
 
 Tất cả các file/thư mục trên đều **không** được đưa lên GitHub (đã loại trừ
 trong `.gitignore`).

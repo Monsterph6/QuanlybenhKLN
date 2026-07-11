@@ -10,6 +10,8 @@ import sqlite3
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 import core
+import netserver
+import netclient
 from core import (
     BASE_DIR, DB_PATH, COLUMNS, DEDUP_FIELDS, PAGE_SIZE,
     get_conn, init_db, record_count, import_excel,
@@ -24,7 +26,15 @@ from core import (
     backup_database, data_quality_summary, data_quality_rows_sql,
     has_password, set_password, verify_password, remove_password,
     get_local_version, check_latest_release,
+    load_lan_config, save_lan_config,
 )
+
+
+def restart_app():
+    """Khoi dong lai ung dung (dung sau khi doi cau hinh mang LAN de ap
+    dung che do may chu / may tram tu dau, tranh phai xu ly hot-swap giua
+    chung)."""
+    os.execv(sys.executable, [sys.executable] + sys.argv[1:])
 
 QT_EXPORT_FILTER = "Excel (*.xlsx);;CSV (*.csv)"
 
@@ -534,10 +544,17 @@ class ImportTab(QtWidgets.QWidget):
         if not path:
             QtWidgets.QMessageBox.warning(self, "Chưa có dữ liệu", "Chưa có CSDL để sao lưu.")
             return
-        self.log_line(f"Đã sao lưu vào: {path}")
-        QtWidgets.QMessageBox.information(self, "Sao lưu thành công", f"Đã sao lưu vào:\n{path}")
+        where = "trên máy chủ" if core.is_remote() else ""
+        self.log_line(f"Đã sao lưu {where} vào: {path}")
+        QtWidgets.QMessageBox.information(self, "Sao lưu thành công", f"Đã sao lưu {where} vào:\n{path}")
 
     def open_backup_folder(self):
+        if core.is_remote():
+            QtWidgets.QMessageBox.information(
+                self, "Máy trạm",
+                "Đang ở chế độ máy trạm — thư mục sao lưu nằm trên máy chủ.\n"
+                "Vui lòng mở thư mục backups/ tại máy chủ.")
+            return
         os.makedirs(core.BACKUP_DIR, exist_ok=True)
         QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(core.BACKUP_DIR))
 
@@ -1401,6 +1418,139 @@ class SqlTab(QtWidgets.QWidget):
 
 
 # ------------------------------------------------------------------
+# Tab Mang LAN: chia se benh_nhan.db cho nhieu may trong cung mang noi
+# bo (khong dung Internet/cloud) - 1 may lam "may chu", cac may khac la
+# "may tram" ket noi toi. Xem netserver.py / netclient.py.
+# ------------------------------------------------------------------
+
+class NetworkTab(QtWidgets.QWidget):
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        cfg = load_lan_config()
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        title = QtWidgets.QLabel("Chia sẻ dữ liệu cho nhiều máy trong cùng mạng LAN")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        note = QtWidgets.QLabel(
+            "Chỉ dùng trong mạng nội bộ tin cậy (không qua Internet/cloud). Một máy đóng vai "
+            "trò \"máy chủ\" (giữ file benh_nhan.db, cần luôn mở ứng dụng trong giờ làm việc), "
+            "các máy còn lại chọn \"máy trạm\" và nhập địa chỉ máy chủ rồi khởi động lại.\n\n"
+            "CẢNH BÁO: chế độ này hiện KHÔNG yêu cầu mật khẩu — bất kỳ máy nào trong cùng mạng "
+            "LAN cũng đọc/ghi được dữ liệu bệnh nhân qua cổng mạng của máy chủ. Chỉ bật trong "
+            "mạng đáng tin cậy (không có Wi-Fi khách), không mở cổng này ra Internet/router.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.role_group = QtWidgets.QButtonGroup(self)
+        self.rb_single = QtWidgets.QRadioButton("Một máy (mặc định, không chia sẻ)")
+        self.rb_server = QtWidgets.QRadioButton("Máy chủ — chia sẻ dữ liệu cho máy khác")
+        self.rb_client = QtWidgets.QRadioButton("Máy trạm — kết nối tới máy chủ khác")
+        for rb in (self.rb_single, self.rb_server, self.rb_client):
+            self.role_group.addButton(rb)
+            layout.addWidget(rb)
+
+        server_row = QtWidgets.QHBoxLayout()
+        server_row.addWidget(QtWidgets.QLabel("Cổng máy chủ:"))
+        self.port_edit = QtWidgets.QLineEdit(str(cfg.get("port", 8765)))
+        self.port_edit.setFixedWidth(80)
+        server_row.addWidget(self.port_edit)
+        server_row.addStretch(1)
+        layout.addLayout(server_row)
+
+        client_row = QtWidgets.QHBoxLayout()
+        client_row.addWidget(QtWidgets.QLabel("Địa chỉ máy chủ:"))
+        self.server_url_edit = QtWidgets.QLineEdit(cfg.get("server_url", ""))
+        self.server_url_edit.setPlaceholderText("vd: http://192.168.1.10:8765")
+        client_row.addWidget(self.server_url_edit, stretch=1)
+        test_btn = QtWidgets.QPushButton("Kiểm tra kết nối")
+        test_btn.clicked.connect(self.test_connection)
+        client_row.addWidget(test_btn)
+        layout.addLayout(client_row)
+
+        save_btn = QtWidgets.QPushButton("Lưu cài đặt && khởi động lại ứng dụng")
+        save_btn.setObjectName("PrimaryButton")
+        save_btn.clicked.connect(self.save_and_restart)
+        layout.addWidget(save_btn, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        self.status_label = QtWidgets.QLabel()
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+        layout.addStretch(1)
+
+        role = cfg.get("role", "single")
+        {"single": self.rb_single, "server": self.rb_server, "client": self.rb_client}.get(
+            role, self.rb_single).setChecked(True)
+        self._refresh_status(cfg)
+
+    def _refresh_status(self, cfg):
+        role = cfg.get("role", "single")
+        if role == "server":
+            ip = netserver.get_local_ip()
+            port = cfg.get("port", 8765)
+            running = "đang chia sẻ" if netserver.is_running() else "CHƯA bật - hãy khởi động lại ứng dụng"
+            self.status_label.setText(
+                f"Đang ở chế độ MÁY CHỦ ({running}).\nĐịa chỉ cho các máy khác nhập vào ô "
+                f"\"Máy trạm\": http://{ip}:{port}")
+        elif role == "client":
+            self.status_label.setText(
+                f"Đang ở chế độ MÁY TRẠM, kết nối tới: {cfg.get('server_url', '(chưa đặt)')}")
+        else:
+            self.status_label.setText("Đang ở chế độ MỘT MÁY (không chia sẻ qua mạng).")
+
+    def test_connection(self):
+        url = self.server_url_edit.text().strip()
+        if not url:
+            QtWidgets.QMessageBox.warning(self, "Thiếu địa chỉ", "Vui lòng nhập địa chỉ máy chủ.")
+            return
+        if not url.startswith("http"):
+            url = "http://" + url
+        ok, info = netclient.ping(url)
+        if ok:
+            QtWidgets.QMessageBox.information(
+                self, "Kết nối thành công", f"Máy chủ phản hồi OK (phiên bản: {info or 'không rõ'}).")
+        else:
+            QtWidgets.QMessageBox.critical(self, "Không kết nối được", str(info))
+
+    def save_and_restart(self):
+        if self.rb_server.isChecked():
+            role = "server"
+        elif self.rb_client.isChecked():
+            role = "client"
+        else:
+            role = "single"
+
+        cfg = {"role": role}
+        if role == "server":
+            try:
+                port = int(self.port_edit.text().strip())
+            except ValueError:
+                QtWidgets.QMessageBox.warning(self, "Cổng không hợp lệ", "Vui lòng nhập số cổng hợp lệ.")
+                return
+            cfg["port"] = port
+        elif role == "client":
+            url = self.server_url_edit.text().strip()
+            if not url:
+                QtWidgets.QMessageBox.warning(self, "Thiếu địa chỉ", "Vui lòng nhập địa chỉ máy chủ.")
+                return
+            if not url.startswith("http"):
+                url = "http://" + url
+            cfg["server_url"] = url
+
+        save_lan_config(cfg)
+        reply = QtWidgets.QMessageBox.question(
+            self, "Khởi động lại",
+            "Đã lưu cài đặt. Cần khởi động lại ứng dụng để áp dụng đầy đủ. Khởi động lại ngay?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            restart_app()
+
+
+# ------------------------------------------------------------------
 # Cua so chinh
 # ------------------------------------------------------------------
 
@@ -1450,11 +1600,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.data_tab = DataTab(self)
         self.dedup_tab = DedupTab(self)
         self.sql_tab = SqlTab(self)
+        self.network_tab = NetworkTab(self)
 
         tabs.addTab(self.import_tab, "Nhập dữ liệu")
         tabs.addTab(self.data_tab, "Danh sách")
         tabs.addTab(self.dedup_tab, "Lọc trùng")
         tabs.addTab(self.sql_tab, "Truy vấn SQL")
+        tabs.addTab(self.network_tab, "Mạng LAN")
         central_layout.addWidget(tabs)
         self.setCentralWidget(central)
 
@@ -1462,13 +1614,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.statusBar().addWidget(self.status_label)
         self.refresh_status()
 
+        lan_cfg = load_lan_config()
+        if lan_cfg.get("role") == "server":
+            netserver.start_server(lan_cfg.get("port", 8765))
+
         self.update_worker = UpdateCheckWorker()
         self.update_worker.result.connect(self.on_update_available)
         self.update_worker.start()
 
     def refresh_status(self):
         n = record_count()
-        self.status_label.setText(f"  CSDL: {DB_PATH}   |   Tổng số bản ghi: {n:,}")
+        if core.is_remote():
+            target = f"Máy trạm — máy chủ: {core.REMOTE_BASE_URL}"
+        else:
+            target = f"CSDL: {DB_PATH}"
+        self.status_label.setText(f"  {target}   |   Tổng số bản ghi: {n:,}")
 
     def on_data_changed(self):
         self.refresh_status()
@@ -1658,6 +1818,11 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE_SHEET)
+    app.aboutToQuit.connect(netserver.stop_server)
+
+    lan_cfg = load_lan_config()
+    if lan_cfg.get("role") == "client":
+        core.configure_remote(lan_cfg.get("server_url", ""), lan_cfg.get("api_key", ""))
 
     if has_password():
         login = LoginDialog()
