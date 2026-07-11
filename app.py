@@ -10,7 +10,6 @@ import sqlite3
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 import core
-import netserver
 import netclient
 from core import (
     BASE_DIR, DB_PATH, COLUMNS, DEDUP_FIELDS, PAGE_SIZE,
@@ -1418,9 +1417,11 @@ class SqlTab(QtWidgets.QWidget):
 
 
 # ------------------------------------------------------------------
-# Tab Mang LAN: chia se benh_nhan.db cho nhieu may trong cung mang noi
-# bo (khong dung Internet/cloud) - 1 may lam "may chu", cac may khac la
-# "may tram" ket noi toi. Xem netserver.py / netclient.py.
+# Tab Mang LAN: ket noi toi may chu chia se benh_nhan.db qua mang LAN
+# noi bo (khong dung Internet/cloud). Ban than ung dung nay (app.py) chi
+# dong vai tro "may tram" (client) - "may chu" la 1 goi rieng, nhe hon
+# (khong dung PyQt6), chay nhu Windows Service - xem service.py,
+# server_tray.py va muc "May chu chia se mang LAN" trong README.
 # ------------------------------------------------------------------
 
 class NetworkTab(QtWidgets.QWidget):
@@ -1432,35 +1433,27 @@ class NetworkTab(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(12)
 
-        title = QtWidgets.QLabel("Chia sẻ dữ liệu cho nhiều máy trong cùng mạng LAN")
+        title = QtWidgets.QLabel("Kết nối tới máy chủ chia sẻ dữ liệu qua mạng LAN")
         title.setObjectName("SectionTitle")
         layout.addWidget(title)
 
         note = QtWidgets.QLabel(
-            "Chỉ dùng trong mạng nội bộ tin cậy (không qua Internet/cloud). Một máy đóng vai "
-            "trò \"máy chủ\" (giữ file benh_nhan.db, cần luôn mở ứng dụng trong giờ làm việc), "
-            "các máy còn lại chọn \"máy trạm\" và nhập địa chỉ máy chủ rồi khởi động lại.\n\n"
+            "Dùng khi có 1 máy khác trong cùng mạng LAN nội bộ (không qua Internet/cloud) đã "
+            "được cài làm \"máy chủ\" chia sẻ (xem gói cài đặt máy chủ riêng, không nằm trong "
+            "ứng dụng này). Nhập địa chỉ máy chủ rồi lưu + khởi động lại để mọi thao tác (nhập "
+            "Excel, lọc trùng, gộp, truy vấn SQL...) đọc/ghi trực tiếp qua mạng.\n\n"
             "CẢNH BÁO: chế độ này hiện KHÔNG yêu cầu mật khẩu — bất kỳ máy nào trong cùng mạng "
-            "LAN cũng đọc/ghi được dữ liệu bệnh nhân qua cổng mạng của máy chủ. Chỉ bật trong "
-            "mạng đáng tin cậy (không có Wi-Fi khách), không mở cổng này ra Internet/router.")
+            "LAN cũng đọc/ghi được dữ liệu bệnh nhân qua cổng mạng của máy chủ. Chỉ dùng trong "
+            "mạng đáng tin cậy (không có Wi-Fi khách).")
         note.setWordWrap(True)
         layout.addWidget(note)
 
         self.role_group = QtWidgets.QButtonGroup(self)
         self.rb_single = QtWidgets.QRadioButton("Một máy (mặc định, không chia sẻ)")
-        self.rb_server = QtWidgets.QRadioButton("Máy chủ — chia sẻ dữ liệu cho máy khác")
-        self.rb_client = QtWidgets.QRadioButton("Máy trạm — kết nối tới máy chủ khác")
-        for rb in (self.rb_single, self.rb_server, self.rb_client):
+        self.rb_client = QtWidgets.QRadioButton("Máy trạm — kết nối tới máy chủ")
+        for rb in (self.rb_single, self.rb_client):
             self.role_group.addButton(rb)
             layout.addWidget(rb)
-
-        server_row = QtWidgets.QHBoxLayout()
-        server_row.addWidget(QtWidgets.QLabel("Cổng máy chủ:"))
-        self.port_edit = QtWidgets.QLineEdit(str(cfg.get("port", 8765)))
-        self.port_edit.setFixedWidth(80)
-        server_row.addWidget(self.port_edit)
-        server_row.addStretch(1)
-        layout.addLayout(server_row)
 
         client_row = QtWidgets.QHBoxLayout()
         client_row.addWidget(QtWidgets.QLabel("Địa chỉ máy chủ:"))
@@ -1483,20 +1476,12 @@ class NetworkTab(QtWidgets.QWidget):
         layout.addStretch(1)
 
         role = cfg.get("role", "single")
-        {"single": self.rb_single, "server": self.rb_server, "client": self.rb_client}.get(
-            role, self.rb_single).setChecked(True)
+        {"single": self.rb_single, "client": self.rb_client}.get(role, self.rb_single).setChecked(True)
         self._refresh_status(cfg)
 
     def _refresh_status(self, cfg):
         role = cfg.get("role", "single")
-        if role == "server":
-            ip = netserver.get_local_ip()
-            port = cfg.get("port", 8765)
-            running = "đang chia sẻ" if netserver.is_running() else "CHƯA bật - hãy khởi động lại ứng dụng"
-            self.status_label.setText(
-                f"Đang ở chế độ MÁY CHỦ ({running}).\nĐịa chỉ cho các máy khác nhập vào ô "
-                f"\"Máy trạm\": http://{ip}:{port}")
-        elif role == "client":
+        if role == "client":
             self.status_label.setText(
                 f"Đang ở chế độ MÁY TRẠM, kết nối tới: {cfg.get('server_url', '(chưa đặt)')}")
         else:
@@ -1517,22 +1502,10 @@ class NetworkTab(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(self, "Không kết nối được", str(info))
 
     def save_and_restart(self):
-        if self.rb_server.isChecked():
-            role = "server"
-        elif self.rb_client.isChecked():
-            role = "client"
-        else:
-            role = "single"
+        role = "client" if self.rb_client.isChecked() else "single"
 
         cfg = {"role": role}
-        if role == "server":
-            try:
-                port = int(self.port_edit.text().strip())
-            except ValueError:
-                QtWidgets.QMessageBox.warning(self, "Cổng không hợp lệ", "Vui lòng nhập số cổng hợp lệ.")
-                return
-            cfg["port"] = port
-        elif role == "client":
+        if role == "client":
             url = self.server_url_edit.text().strip()
             if not url:
                 QtWidgets.QMessageBox.warning(self, "Thiếu địa chỉ", "Vui lòng nhập địa chỉ máy chủ.")
@@ -1613,10 +1586,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status_label = QtWidgets.QLabel()
         self.statusBar().addWidget(self.status_label)
         self.refresh_status()
-
-        lan_cfg = load_lan_config()
-        if lan_cfg.get("role") == "server":
-            netserver.start_server(lan_cfg.get("port", 8765))
 
         self.update_worker = UpdateCheckWorker()
         self.update_worker.result.connect(self.on_update_available)
@@ -1818,7 +1787,6 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE_SHEET)
-    app.aboutToQuit.connect(netserver.stop_server)
 
     lan_cfg = load_lan_config()
     if lan_cfg.get("role") == "client":

@@ -18,6 +18,8 @@ backups/
 # Build artifacts
 build/
 dist/
+build_server/
+dist_server/
 setup_output/
 *.spec
 __pycache__/

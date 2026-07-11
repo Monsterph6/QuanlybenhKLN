@@ -3,12 +3,20 @@
 Ứng dụng desktop offline (Python + SQLite + giao diện PyQt6) để nhập danh sách
 bệnh nhân từ Excel, lưu trữ, lọc trùng và xuất kết quả ra Excel/CSV.
 
-Mã nguồn gồm 4 file:
+Có 2 thành phần riêng biệt, đóng gói và cài đặt độc lập với nhau:
+- **Ứng dụng chính (`app.py`)** — giao diện PyQt6 dùng hằng ngày, cài trên mọi
+  máy (kể cả khi chỉ dùng 1 máy duy nhất, không chia sẻ qua mạng).
+- **Máy chủ chia sẻ mạng LAN (`service.py` + `server_tray.py`)** — gói riêng,
+  KHÔNG dùng PyQt6 nên nhẹ hơn nhiều, chỉ cài trên 1 máy khi cần nhiều máy
+  dùng chung 1 CSDL qua mạng nội bộ. Xem mục "Máy chủ chia sẻ mạng LAN" bên dưới.
+
+Mã nguồn gồm:
 - `core.py` — tầng dữ liệu: SQLite, đọc/chuẩn hóa Excel, xuất Excel/CSV (không phụ thuộc giao diện).
 - `app.py` — giao diện PyQt6 (nhập `core.py` để xử lý dữ liệu).
-- `netserver.py` / `netclient.py` — cho phép nhiều máy trong cùng mạng LAN nội
-  bộ dùng chung 1 CSDL (xem tab "Mạng LAN" bên dưới), chỉ dùng thư viện chuẩn
-  Python, không thêm phụ thuộc mới.
+- `netserver.py` / `netclient.py` — tầng giao tiếp qua mạng LAN dùng chung bởi
+  cả máy chủ và máy trạm, chỉ dùng thư viện chuẩn Python.
+- `service.py` / `server_tray.py` — thành phần "máy chủ" (Windows Service +
+  tray helper), xem mục riêng bên dưới.
 
 ## Yêu cầu
 
@@ -135,29 +143,87 @@ dưới và chạy luôn, có thể chỉnh sửa lại nếu cần trước khi
 
 ### 5. Tab "Mạng LAN"
 
-Cho phép nhiều máy trong **cùng một mạng LAN nội bộ** (ví dụ nhiều máy trong
-cùng một trạm y tế) cùng dùng chung 1 cơ sở dữ liệu `benh_nhan.db`, mà không
-cần Internet hay dịch vụ cloud nào — dữ liệu không rời khỏi mạng nội bộ.
+Dùng khi máy này cần dùng chung dữ liệu với 1 **máy chủ** đã được cài riêng
+trong cùng mạng LAN nội bộ (xem mục "Máy chủ chia sẻ mạng LAN" bên dưới —
+máy chủ là 1 gói cài đặt khác, không nằm trong ứng dụng chính này).
 
 - **Một máy (mặc định)**: hoạt động độc lập như trước đây, không chia sẻ.
-- **Máy chủ**: máy giữ file `benh_nhan.db` thật. Chọn cổng (mặc định `8765`),
-  lưu cài đặt và khởi động lại — ứng dụng sẽ tự mở cổng chia sẻ mỗi khi khởi
-  động (cần luôn mở ứng dụng trên máy này trong giờ làm việc để các máy khác
-  dùng được). Tab sẽ hiện địa chỉ dạng `http://<ip>:<cổng>` để cung cấp cho
-  các máy trạm.
 - **Máy trạm**: nhập đúng địa chỉ máy chủ (bấm **Kiểm tra kết nối** để thử
   trước), lưu cài đặt và khởi động lại. Sau đó mọi thao tác (nhập Excel, lọc
   trùng, gộp, truy vấn SQL...) đều đọc/ghi trực tiếp vào CSDL trên máy chủ qua
   mạng LAN — không còn dùng file `benh_nhan.db` cục bộ nữa. Nút "Sao lưu CSDL
   ngay" / "Mở thư mục sao lưu" trên máy trạm sẽ tác động tới bản sao lưu trên
-  máy chủ.
+  máy chủ (đường dẫn trả về là đường dẫn trên máy chủ).
 
 **Lưu ý bảo mật:** chế độ này hiện **không yêu cầu mật khẩu** — bất kỳ máy nào
 truy cập được vào cổng mạng của máy chủ (cùng mạng LAN) đều đọc/ghi được toàn
 bộ dữ liệu bệnh nhân, kể cả chạy được câu lệnh SQL tùy ý (tab "Truy vấn SQL" đã
 giới hạn phía máy trạm chỉ cho gõ `SELECT`, nhưng máy chủ không tự kiểm tra lại
-điều đó). Chỉ bật tính năng này trong mạng nội bộ đáng tin cậy (không có Wi-Fi
-khách lạ dùng chung), và **không** mở cổng này ra Internet qua router/port-forwarding.
+điều đó). Chỉ dùng tính năng này trong mạng nội bộ đáng tin cậy (không có
+Wi-Fi khách lạ dùng chung).
+
+## Máy chủ chia sẻ mạng LAN (gói cài đặt riêng)
+
+Khi nhiều máy trong cùng một trạm y tế cần dùng chung 1 CSDL, **một máy** (máy
+"để bàn", luôn bật) đóng vai trò máy chủ. Máy chủ là **chương trình độc lập**
+với ứng dụng chính — không dùng PyQt6 nên nhẹ hơn nhiều lần, chạy hoàn toàn
+ngầm (không cửa sổ), tự khởi động cùng Windows và tự khởi động lại nếu bị lỗi,
+kể cả trước khi có ai đăng nhập vào máy — vì nó chạy dưới dạng **Windows
+Service** thật sự, không phải chỉ là 1 ứng dụng thường được thêm vào Startup.
+
+Gồm 2 chương trình tách biệt:
+- **`service.py`** — Windows Service thực sự, làm việc chính (chia sẻ dữ liệu
+  qua mạng). Không có giao diện gì — theo đúng bản chất của Windows Service
+  (chạy trong phiên hệ thống riêng, tách biệt khỏi màn hình desktop, nên về
+  nguyên tắc không thể tự hiện cửa sổ/icon được).
+- **`server_tray.py`** — "bảng điều khiển" nhỏ, chạy trong phiên đăng nhập của
+  người dùng, hiện 1 icon ở khay hệ thống (chấm xanh = đang chia sẻ, đỏ = đang
+  dừng) để xem địa chỉ IP:cổng hiện tại, bật/dừng dịch vụ, và bật/tắt tự khởi
+  động cùng Windows cho chính icon tray này (dịch vụ tự khởi động cùng máy độc
+  lập với tray, xem bên dưới). Đóng icon tray (nút "Thoát") **không** làm dừng
+  việc chia sẻ — dịch vụ vẫn chạy ngầm bình thường.
+
+### Cài đặt máy chủ
+
+1. Trên máy sẽ làm máy chủ, cài thư viện riêng cho máy chủ (khác với
+   `requirements.txt` của ứng dụng chính):
+   ```
+   pip install -r requirements-server.txt
+   ```
+2. Chuột phải vào `install_server.bat` → **Run as administrator** (bắt buộc,
+   vì cài Windows Service cần quyền Administrator). Script sẽ tự tạo
+   `lan_config.json` với cổng mặc định `8765` nếu chưa có, cài và bật dịch vụ.
+3. (Tuỳ chọn) Chạy `server_tray.py` để xem icon trạng thái ở khay hệ thống, và
+   bấm menu "Khởi động cùng Windows" nếu muốn icon này tự mở lại mỗi khi có
+   người đăng nhập vào máy chủ (không bắt buộc — dịch vụ vẫn chạy dù không có
+   tray).
+
+Muốn đổi cổng: dừng dịch vụ, sửa số cổng trong `lan_config.json` bằng Notepad,
+bật lại dịch vụ (`uninstall_server.bat` rồi `install_server.bat`, hoặc dùng
+`services.msc` để restart dịch vụ `QuanLyBenhNhanTHA_Server`).
+
+Muốn gỡ: chuột phải `uninstall_server.bat` → **Run as administrator**. Dữ liệu
+`benh_nhan.db` và `backups/` không bị xóa.
+
+### Đóng gói máy chủ thành file .exe (không cần Python trên máy đích)
+
+Tương tự `build.bat` của ứng dụng chính:
+```
+build_server.bat
+```
+Kết quả nằm ở `dist_server\QuanLyBenhNhanTHA-Service\` và
+`dist_server\QuanLyBenhNhanTHA-Tray\`. Cài dịch vụ từ bản đã đóng gói (vẫn cần
+quyền Administrator):
+```
+QuanLyBenhNhanTHA-Service.exe --startup auto install
+QuanLyBenhNhanTHA-Service.exe start
+```
+
+> **Lưu ý:** phần Windows Service (`service.py`, `server_tray.py`) chỉ chạy
+> được trên Windows và cần thư viện `pywin32`/`pystray` — chưa được kiểm thử
+> trên máy Windows thật (được viết theo đúng mẫu chuẩn của pywin32/pystray và
+> đã kiểm tra cú pháp, nhưng nên tự kiểm thử kỹ trên 1 máy Windows trước khi
+> dùng cho dữ liệu bệnh nhân thật).
 
 ## Cấu trúc dữ liệu trong CSDL (bảng `patients`)
 
