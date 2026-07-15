@@ -942,24 +942,28 @@ def get_update_token():
 def check_latest_release(timeout=5, tag_prefix="v"):
     """Tra ve (tag_moi_nhat, html_url) cua release moi nhat co tag bat dau
     bang `tag_prefix`, hoac (None, None) neu khong kiem tra duoc (khong
-    mang, chua co token, repo chua co release phu hop...). Khong bao gio
-    raise loi - danh cho kiem tra nen, khong duoc lam gian doan app.
+    mang, repo chua co release phu hop...). Khong bao gio raise loi - danh
+    cho kiem tra nen, khong duoc lam gian doan app.
 
     Ung dung may tram (app.py) va goi may chu (service.py/server_tray.py)
     dung chung 1 repo Release nhung 2 dong phien ban tach rieng bang tien
     to tag: "vX.Y.Z" cho may tram (tag_prefix mac dinh "v"), "server-vX.Y.Z"
     cho may chu (goi voi tag_prefix="server-v"). Dung /releases (danh sach)
     thay vi /releases/latest de loc dung dong phien ban can, vi
-    /releases/latest tra ve release moi nhat theo thoi gian bat ke tag nao."""
+    /releases/latest tra ve release moi nhat theo thoi gian bat ke tag nao.
+
+    Token la tuy chon - chi can neu repo dang o che do Private (xem
+    get_update_token()); repo Public van kiem tra duoc binh thuong ma
+    khong can token."""
     token = get_update_token()
-    if not token:
-        return None, None
     url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases?per_page=20"
-    req = urllib.request.Request(url, headers={
+    headers = {
         "Accept": "application/vnd.github+json",
         "User-Agent": "QuanLyBenhNhanTHA",
-        "Authorization": f"token {token}",
-    })
+    }
+    if token:
+        headers["Authorization"] = f"token {token}"
+    req = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             releases = json.loads(resp.read().decode("utf-8"))

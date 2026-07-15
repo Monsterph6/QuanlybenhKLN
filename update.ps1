@@ -31,22 +31,22 @@ if ($running) {
     }
 }
 
-# --- Lay token (repo private can Personal Access Token de tai duoc) ---
+# --- Lay token (chi can neu repo dang o che do Private; bo trong duoc neu
+# repo da chuyen sang Public - xem README.md muc "Lay Personal Access Token") ---
 if (-not (Test-Path $tokenFile)) {
-    Write-Warn2 "Chua co token GitHub de tai ban cap nhat (repo o che do private)."
-    Write-Host "Xem huong dan lay token trong README.md, muc 'Lay Personal Access Token'."
-    $token = Read-Host "Dan Personal Access Token vao day roi Enter (token se duoc luu lai cho lan sau)"
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        Write-Err2 "Chua nhap token. Huy cap nhat."
-        exit 1
-    }
+    Write-Warn2 "Chua cau hinh Personal Access Token."
+    Write-Host "Neu repo dang Private: xem huong dan lay token trong README.md, muc 'Lay Personal Access Token'."
+    Write-Host "Neu repo da chuyen sang Public: cu de trong roi nhan Enter, khong can token."
+    $token = Read-Host "Dan Personal Access Token vao day (de trong neu khong can)"
     Set-Content -Path $tokenFile -Value $token.Trim() -NoNewline -Encoding utf8
 }
 $token = (Get-Content $tokenFile -Raw).Trim()
 $headers = @{
-    Authorization = "token $token"
-    Accept        = "application/vnd.github+json"
-    "User-Agent"  = "QuanLyBenhNhanTHA-Updater"
+    Accept       = "application/vnd.github+json"
+    "User-Agent" = "QuanLyBenhNhanTHA-Updater"
+}
+if ($token) {
+    $headers["Authorization"] = "token $token"
 }
 
 # --- Phien ban hien tai ---
@@ -93,9 +93,11 @@ if (-not $asset) {
 
 Write-Info "Dang tai ban $remoteVersion ($([math]::Round($asset.size/1MB,1)) MB) ..."
 $downloadHeaders = @{
-    Authorization = "token $token"
-    Accept        = "application/octet-stream"
-    "User-Agent"  = "QuanLyBenhNhanTHA-Updater"
+    Accept       = "application/octet-stream"
+    "User-Agent" = "QuanLyBenhNhanTHA-Updater"
+}
+if ($token) {
+    $downloadHeaders["Authorization"] = "token $token"
 }
 $tmpZip = Join-Path $env:TEMP "QuanLyBenhNhanTHA-update.zip"
 Invoke-WebRequest -Uri $asset.url -Headers $downloadHeaders -OutFile $tmpZip
