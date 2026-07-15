@@ -55,13 +55,47 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Description: "Chay {#MyAppName} ngay"; Flags: nowait postinstall skipifsilent
 
 [Code]
+var
+  ServerPage: TInputQueryWizardPage;
+
+procedure InitializeWizard;
+begin
+  ServerPage := CreateInputQueryPage(wpSelectDir,
+    'Kết nối máy chủ chia sẻ mạng LAN (tuỳ chọn)',
+    'Chỉ điền nếu máy này dùng chung dữ liệu với 1 máy chủ khác trong mạng nội bộ',
+    'Nếu máy này chỉ dùng ĐỘC LẬP (không chia sẻ qua mạng), để trống ô bên dưới ' +
+    'rồi bấm Next.'#13#10#13#10 +
+    'Nếu đã có máy chủ chia sẻ (xem gói cài đặt "QuanLyBenhNhanTHA-Server-Setup") ' +
+    'đang chạy trong cùng mạng LAN, nhập địa chỉ IP:cổng của máy chủ đó (ví dụ ' +
+    '192.168.1.10:8765) - có thể xem/đổi lại sau trong tab "Mạng LAN" của ứng dụng.');
+  ServerPage.Add('Địa chỉ máy chủ (để trống nếu dùng 1 máy):', False);
+end;
+
+function BuildServerUrl(Addr: String): String;
+begin
+  if (Pos('http://', Addr) = 1) or (Pos('https://', Addr) = 1) then
+    Result := Addr
+  else
+    Result := 'http://' + Addr;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   VersionFile: String;
+  ConfigFile: String;
+  ServerAddr: String;
 begin
   if CurStep = ssPostInstall then
   begin
     VersionFile := ExpandConstant('{app}\VERSION.txt');
     SaveStringToFile(VersionFile, '{#MyAppVersion}', False);
+
+    ServerAddr := Trim(ServerPage.Values[0]);
+    if ServerAddr <> '' then
+    begin
+      ConfigFile := ExpandConstant('{app}\lan_config.json');
+      SaveStringToFile(ConfigFile,
+        '{"role": "client", "server_url": "' + BuildServerUrl(ServerAddr) + '"}', False);
+    end;
   end;
 end;

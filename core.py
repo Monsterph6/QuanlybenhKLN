@@ -84,10 +84,60 @@ def build_dedup_key(selected_labels):
 
 
 # ------------------------------------------------------------------
+# Cau hinh mang LAN (may chu / may tram) - chia se benh_nhan.db cho
+# nhieu may trong cung mang noi bo, khong dung Internet/cloud.
+# ------------------------------------------------------------------
+
+LAN_CONFIG_FILE = os.path.join(BASE_DIR, "lan_config.json")
+
+REMOTE_BASE_URL = None
+REMOTE_API_KEY = ""
+
+
+def load_lan_config():
+    """Doc cau hinh che do mang LAN da luu, vi du:
+    {"role": "server", "port": 8765, "api_key": ""}
+    {"role": "client", "server_url": "http://192.168.1.10:8765", "api_key": ""}
+    role mac dinh "single" (1 may, khong chia se qua mang)."""
+    if os.path.exists(LAN_CONFIG_FILE):
+        try:
+            with open(LAN_CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            pass
+    return {"role": "single"}
+
+
+def save_lan_config(cfg):
+    with open(LAN_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def get_lan_api_key():
+    return (load_lan_config().get("api_key") or "").strip()
+
+
+def configure_remote(url, api_key=""):
+    """Bat che do may tram: moi thao tac CSDL duoc goi qua mang LAN toi may
+    chu tai `url` (vi du 'http://192.168.1.10:8765') thay vi mo file
+    benh_nhan.db cuc bo. Goi voi url rong/None de tat (dung file cuc bo)."""
+    global REMOTE_BASE_URL, REMOTE_API_KEY
+    REMOTE_BASE_URL = url.rstrip("/") if url else None
+    REMOTE_API_KEY = api_key or ""
+
+
+def is_remote():
+    return REMOTE_BASE_URL is not None
+
+
+# ------------------------------------------------------------------
 # Tang du lieu (DB)
 # ------------------------------------------------------------------
 
 def get_conn():
+    if REMOTE_BASE_URL:
+        from netclient import RemoteConnection
+        return RemoteConnection(REMOTE_BASE_URL, REMOTE_API_KEY)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
@@ -319,32 +369,47 @@ def row_hash(r):
 
 
 def import_excel(path, progress_cb=None):
-    """Doc file Excel va nhap vao SQLite. Tra ve (tong_doc, them_moi, bo_qua_trung)."""
+    """Doc file Excel va nhap vao SQLite. Tra ve (tong_doc, them_moi, bo_qua_trung).
+    Ghi theo lo (executemany moi 500 dong) de giam so lan goi mang khi dang
+    o che do may tram (moi lan goi la 1 request qua mang toi may chu)."""
     conn = get_conn()
     cur = conn.cursor()
     total = 0
     inserted = 0
     nguon = os.path.basename(path)
     now = datetime.datetime.now().isoformat(timespec="seconds")
+    sql = """
+        INSERT OR IGNORE INTO patients
+        (tt, ho_ten, gioi_tinh, nam_sinh_raw, birth_year, ma_bhyt, so_cccd,
+         dia_chi, phuong_xa, tinh_tp, ngay_kham_raw, ngay_kham_date,
+         chan_doan, benh_kem_theo, nguon_file, imported_at, row_hash)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """
+    batch = []
+
+    def flush():
+        nonlocal inserted
+        if not batch:
+            return
+        cur.executemany(sql, batch)
+        if cur.rowcount and cur.rowcount > 0:
+            inserted += cur.rowcount
+        batch.clear()
+
     for r in read_excel_rows(path):
         total += 1
         h = row_hash(r)
-        cur.execute("""
-            INSERT OR IGNORE INTO patients
-            (tt, ho_ten, gioi_tinh, nam_sinh_raw, birth_year, ma_bhyt, so_cccd,
-             dia_chi, phuong_xa, tinh_tp, ngay_kham_raw, ngay_kham_date,
-             chan_doan, benh_kem_theo, nguon_file, imported_at, row_hash)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
+        batch.append((
             r["tt"], r["ho_ten"], r["gioi_tinh"], r["nam_sinh_raw"], r["birth_year"],
             r["ma_bhyt"], r["so_cccd"], r["dia_chi"], r["phuong_xa"], r["tinh_tp"],
             r["ngay_kham_raw"], r["ngay_kham_date"], r["chan_doan"], r["benh_kem_theo"],
             nguon, now, h,
         ))
-        if cur.rowcount:
-            inserted += 1
+        if len(batch) >= 500:
+            flush()
         if progress_cb and total % 500 == 0:
             progress_cb(total)
+    flush()
     conn.commit()
     conn.close()
     return total, inserted, total - inserted
@@ -706,7 +771,12 @@ def fix_unparsed_kham_dates():
 def backup_database(reason="thao_tac", keep=10):
     """Sao chep benh_nhan.db sang thu muc backups/ kem timestamp. Tu dong don
     bot, chi giu lai `keep` ban gan nhat. Tra ve duong dan file backup, hoac
-    None neu chua co CSDL de sao luu."""
+    None neu chua co CSDL de sao luu.
+    O che do may tram, chuyen tiep yeu cau nay sang may chu (chi may chu moi
+    thuc su giu file benh_nhan.db va thu muc backups/)."""
+    if REMOTE_BASE_URL:
+        from netclient import request_backup
+        return request_backup(REMOTE_BASE_URL, reason, keep, REMOTE_API_KEY)
     if not os.path.exists(DB_PATH):
         return None
     os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -776,6 +846,49 @@ def data_quality_rows_sql():
 
 
 # ------------------------------------------------------------------
+# Thong ke truc quan (dung cho tab "Thong ke" - ve bieu do bang QtCharts)
+# ------------------------------------------------------------------
+
+# Chi cho phep thong ke theo cac cot trong danh sach nay (dua thang ten cot
+# vao f-string SQL ben duoi - KHONG duoc nhan gia tri tuy y tu nguoi dung,
+# chi duoc goi voi 1 trong cac key co san o day).
+STATS_COLUMNS = {
+    "gioi_tinh": "Giới tính",
+    "tinh_tp": "Tỉnh/Thành phố",
+    "phuong_xa": "Phường/Xã",
+    "chan_doan": "Chẩn đoán",
+}
+
+
+def stats_top_values(column, limit=20):
+    """Tra ve list (gia_tri, so_luong) cho 1 cot trong STATS_COLUMNS, xep
+    theo so luong giam dan (bo qua gia tri rong). Dung de ve bieu do."""
+    if column not in STATS_COLUMNS:
+        raise ValueError(f"Cột không hợp lệ để thống kê: {column}")
+    conn = get_conn()
+    rows = conn.execute(f"""
+        SELECT {column}, COUNT(*) AS n FROM patients
+        WHERE TRIM(IFNULL({column}, '')) <> ''
+        GROUP BY {column} ORDER BY n DESC, {column} LIMIT ?
+    """, (limit,)).fetchall()
+    conn.close()
+    return [(r[0], r[1]) for r in rows]
+
+
+def stats_birth_decade():
+    """Tra ve list (nhan_thap_ky vd '1960s', so_luong) theo thap ky nam sinh,
+    sap xep tang dan. Dung de ve bieu do phan bo do tuoi."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT (birth_year / 10) * 10 AS decade, COUNT(*) AS n
+        FROM patients WHERE birth_year IS NOT NULL
+        GROUP BY decade ORDER BY decade
+    """).fetchall()
+    conn.close()
+    return [(f"{int(r[0])}s", r[1]) for r in rows]
+
+
+# ------------------------------------------------------------------
 # Mat khau bao ve ung dung (kiem soat truy cap giao dien - KHONG ma hoa
 # file benh_nhan.db; ai co file van mo duoc bang cong cu SQLite khac)
 # ------------------------------------------------------------------
@@ -826,14 +939,22 @@ def get_update_token():
     return None
 
 
-def check_latest_release(timeout=5):
-    """Tra ve (tag_moi_nhat, html_url) tu GitHub Releases, hoac (None, None)
-    neu khong kiem tra duoc (khong mang, chua co token, repo chua co release...).
-    Khong bao gio raise loi - danh cho kiem tra nen, khong duoc lam gian doan app."""
+def check_latest_release(timeout=5, tag_prefix="v"):
+    """Tra ve (tag_moi_nhat, html_url) cua release moi nhat co tag bat dau
+    bang `tag_prefix`, hoac (None, None) neu khong kiem tra duoc (khong
+    mang, chua co token, repo chua co release phu hop...). Khong bao gio
+    raise loi - danh cho kiem tra nen, khong duoc lam gian doan app.
+
+    Ung dung may tram (app.py) va goi may chu (service.py/server_tray.py)
+    dung chung 1 repo Release nhung 2 dong phien ban tach rieng bang tien
+    to tag: "vX.Y.Z" cho may tram (tag_prefix mac dinh "v"), "server-vX.Y.Z"
+    cho may chu (goi voi tag_prefix="server-v"). Dung /releases (danh sach)
+    thay vi /releases/latest de loc dung dong phien ban can, vi
+    /releases/latest tra ve release moi nhat theo thoi gian bat ke tag nao."""
     token = get_update_token()
     if not token:
         return None, None
-    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+    url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases?per_page=20"
     req = urllib.request.Request(url, headers={
         "Accept": "application/vnd.github+json",
         "User-Agent": "QuanLyBenhNhanTHA",
@@ -841,7 +962,11 @@ def check_latest_release(timeout=5):
     })
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return data.get("tag_name"), data.get("html_url")
+            releases = json.loads(resp.read().decode("utf-8"))
+        for r in releases:
+            tag = r.get("tag_name") or ""
+            if tag.startswith(tag_prefix) and not r.get("draft") and not r.get("prerelease"):
+                return tag, r.get("html_url")
+        return None, None
     except Exception:
         return None, None

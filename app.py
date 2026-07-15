@@ -8,8 +8,13 @@ import sys
 import sqlite3
 
 from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCharts import (
+    QChart, QChartView, QPieSeries, QHorizontalBarSeries, QBarSet,
+    QBarCategoryAxis, QValueAxis,
+)
 
 import core
+import netclient
 from core import (
     BASE_DIR, DB_PATH, COLUMNS, DEDUP_FIELDS, PAGE_SIZE,
     get_conn, init_db, record_count, import_excel,
@@ -24,7 +29,16 @@ from core import (
     backup_database, data_quality_summary, data_quality_rows_sql,
     has_password, set_password, verify_password, remove_password,
     get_local_version, check_latest_release,
+    load_lan_config, save_lan_config,
+    STATS_COLUMNS, stats_top_values, stats_birth_decade,
 )
+
+
+def restart_app():
+    """Khoi dong lai ung dung (dung sau khi doi cau hinh mang LAN de ap
+    dung che do may chu / may tram tu dau, tranh phai xu ly hot-swap giua
+    chung)."""
+    os.execv(sys.executable, [sys.executable] + sys.argv[1:])
 
 QT_EXPORT_FILTER = "Excel (*.xlsx);;CSV (*.csv)"
 
@@ -534,10 +548,17 @@ class ImportTab(QtWidgets.QWidget):
         if not path:
             QtWidgets.QMessageBox.warning(self, "Chưa có dữ liệu", "Chưa có CSDL để sao lưu.")
             return
-        self.log_line(f"Đã sao lưu vào: {path}")
-        QtWidgets.QMessageBox.information(self, "Sao lưu thành công", f"Đã sao lưu vào:\n{path}")
+        where = "trên máy chủ" if core.is_remote() else ""
+        self.log_line(f"Đã sao lưu {where} vào: {path}")
+        QtWidgets.QMessageBox.information(self, "Sao lưu thành công", f"Đã sao lưu {where} vào:\n{path}")
 
     def open_backup_folder(self):
+        if core.is_remote():
+            QtWidgets.QMessageBox.information(
+                self, "Máy trạm",
+                "Đang ở chế độ máy trạm — thư mục sao lưu nằm trên máy chủ.\n"
+                "Vui lòng mở thư mục backups/ tại máy chủ.")
+            return
         os.makedirs(core.BACKUP_DIR, exist_ok=True)
         QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(core.BACKUP_DIR))
 
@@ -1401,6 +1422,234 @@ class SqlTab(QtWidgets.QWidget):
 
 
 # ------------------------------------------------------------------
+# Tab Thong ke: bieu do truc quan (QtCharts) tren du lieu hien co trong
+# CSDL - khong ve ban do dia ly (chua co du lieu ranh gioi hanh chinh
+# chinh thuc dang tin cay de dua vao ung dung).
+# ------------------------------------------------------------------
+
+class StatsTab(QtWidgets.QWidget):
+    # (nhan hien thi, cot CSDL hoac None cho "Nam sinh theo thap ky", kieu bieu do)
+    STAT_OPTIONS = [
+        ("Giới tính", "gioi_tinh", "pie"),
+        ("Tỉnh/Thành phố", "tinh_tp", "bar"),
+        ("Phường/Xã (top 20)", "phuong_xa", "bar"),
+        ("Chẩn đoán (top 15)", "chan_doan", "bar"),
+        ("Năm sinh theo thập kỷ", None, "bar"),
+    ]
+    LIMITS = {"phuong_xa": 20, "chan_doan": 15}
+
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        title = QtWidgets.QLabel("Thống kê trực quan")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel("Loại thống kê:"))
+        self.type_combo = QtWidgets.QComboBox()
+        self.type_combo.addItems([label for label, _, _ in self.STAT_OPTIONS])
+        self.type_combo.currentIndexChanged.connect(self.reload)
+        row.addWidget(self.type_combo)
+
+        refresh_btn = QtWidgets.QPushButton("Làm mới")
+        refresh_btn.clicked.connect(self.reload)
+        row.addWidget(refresh_btn)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        self.chart_view = QChartView()
+        self.chart_view.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        layout.addWidget(self.chart_view, stretch=1)
+
+        self.summary_label = QtWidgets.QLabel()
+        layout.addWidget(self.summary_label)
+
+        self._loaded = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._loaded:
+            self.reload()
+
+    def mark_stale(self):
+        """Goi khi du lieu CSDL thay doi o tab khac - hoan lai viec ve lai
+        bieu do den lan sau tab nay duoc mo, thay vi ve lai ngay ca khi
+        dang khong hien thi."""
+        self._loaded = False
+
+    def reload(self):
+        self._loaded = True
+        label, column, kind = self.STAT_OPTIONS[self.type_combo.currentIndex()]
+        if column is None:
+            data = stats_birth_decade()
+        else:
+            data = stats_top_values(column, limit=self.LIMITS.get(column, 50))
+
+        if not data:
+            self.chart_view.setChart(QChart())
+            self.summary_label.setText("Chưa có dữ liệu để thống kê.")
+            return
+
+        chart = self._make_pie_chart(label, data) if kind == "pie" else self._make_bar_chart(label, data)
+        self.chart_view.setChart(chart)
+        total = sum(n for _, n in data)
+        self.summary_label.setText(f"Tổng {total:,} bản ghi trong {len(data)} nhóm đang hiển thị.")
+
+    def _make_pie_chart(self, title, data):
+        series = QPieSeries()
+        for value, n in data:
+            series.append(f"{value} ({n:,})", n)
+        chart = QChart()
+        chart.addSeries(series)
+        chart.setTitle(title)
+        chart.legend().setVisible(True)
+        chart.legend().setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        return chart
+
+    def _make_bar_chart(self, title, data):
+        # Bieu do ngang (thay vi doc) vi nhan (ten phuong/xa, chan doan...)
+        # thuong la chuoi dai, de doc hon khi de o truc doc.
+        ordered = list(reversed(data))  # gia tri lon nhat nam tren cung
+        bar_set = QBarSet(title)
+        categories = []
+        for value, n in ordered:
+            bar_set.append(n)
+            categories.append(str(value) if value not in (None, "") else "(trống)")
+
+        series = QHorizontalBarSeries()
+        series.append(bar_set)
+
+        chart = QChart()
+        chart.addSeries(series)
+        chart.setTitle(title)
+        chart.legend().setVisible(False)
+
+        axis_y = QBarCategoryAxis()
+        axis_y.append(categories)
+        chart.addAxis(axis_y, QtCore.Qt.AlignmentFlag.AlignLeft)
+        series.attachAxis(axis_y)
+
+        axis_x = QValueAxis()
+        axis_x.setLabelFormat("%d")
+        chart.addAxis(axis_x, QtCore.Qt.AlignmentFlag.AlignBottom)
+        series.attachAxis(axis_x)
+
+        return chart
+
+
+# ------------------------------------------------------------------
+# Tab Mang LAN: ket noi toi may chu chia se benh_nhan.db qua mang LAN
+# noi bo (khong dung Internet/cloud). Ban than ung dung nay (app.py) chi
+# dong vai tro "may tram" (client) - "may chu" la 1 goi rieng, nhe hon
+# (khong dung PyQt6), chay nhu Windows Service - xem service.py,
+# server_tray.py va muc "May chu chia se mang LAN" trong README.
+# ------------------------------------------------------------------
+
+class NetworkTab(QtWidgets.QWidget):
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        cfg = load_lan_config()
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        title = QtWidgets.QLabel("Kết nối tới máy chủ chia sẻ dữ liệu qua mạng LAN")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        note = QtWidgets.QLabel(
+            "Dùng khi có 1 máy khác trong cùng mạng LAN nội bộ (không qua Internet/cloud) đã "
+            "được cài làm \"máy chủ\" chia sẻ (xem gói cài đặt máy chủ riêng, không nằm trong "
+            "ứng dụng này). Nhập địa chỉ máy chủ rồi lưu + khởi động lại để mọi thao tác (nhập "
+            "Excel, lọc trùng, gộp, truy vấn SQL...) đọc/ghi trực tiếp qua mạng.\n\n"
+            "CẢNH BÁO: chế độ này hiện KHÔNG yêu cầu mật khẩu — bất kỳ máy nào trong cùng mạng "
+            "LAN cũng đọc/ghi được dữ liệu bệnh nhân qua cổng mạng của máy chủ. Chỉ dùng trong "
+            "mạng đáng tin cậy (không có Wi-Fi khách).")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        self.role_group = QtWidgets.QButtonGroup(self)
+        self.rb_single = QtWidgets.QRadioButton("Một máy (mặc định, không chia sẻ)")
+        self.rb_client = QtWidgets.QRadioButton("Máy trạm — kết nối tới máy chủ")
+        for rb in (self.rb_single, self.rb_client):
+            self.role_group.addButton(rb)
+            layout.addWidget(rb)
+
+        client_row = QtWidgets.QHBoxLayout()
+        client_row.addWidget(QtWidgets.QLabel("Địa chỉ máy chủ:"))
+        self.server_url_edit = QtWidgets.QLineEdit(cfg.get("server_url", ""))
+        self.server_url_edit.setPlaceholderText("vd: http://192.168.1.10:8765")
+        client_row.addWidget(self.server_url_edit, stretch=1)
+        test_btn = QtWidgets.QPushButton("Kiểm tra kết nối")
+        test_btn.clicked.connect(self.test_connection)
+        client_row.addWidget(test_btn)
+        layout.addLayout(client_row)
+
+        save_btn = QtWidgets.QPushButton("Lưu cài đặt && khởi động lại ứng dụng")
+        save_btn.setObjectName("PrimaryButton")
+        save_btn.clicked.connect(self.save_and_restart)
+        layout.addWidget(save_btn, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        self.status_label = QtWidgets.QLabel()
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+        layout.addStretch(1)
+
+        role = cfg.get("role", "single")
+        {"single": self.rb_single, "client": self.rb_client}.get(role, self.rb_single).setChecked(True)
+        self._refresh_status(cfg)
+
+    def _refresh_status(self, cfg):
+        role = cfg.get("role", "single")
+        if role == "client":
+            self.status_label.setText(
+                f"Đang ở chế độ MÁY TRẠM, kết nối tới: {cfg.get('server_url', '(chưa đặt)')}")
+        else:
+            self.status_label.setText("Đang ở chế độ MỘT MÁY (không chia sẻ qua mạng).")
+
+    def test_connection(self):
+        url = self.server_url_edit.text().strip()
+        if not url:
+            QtWidgets.QMessageBox.warning(self, "Thiếu địa chỉ", "Vui lòng nhập địa chỉ máy chủ.")
+            return
+        if not url.startswith("http"):
+            url = "http://" + url
+        ok, info = netclient.ping(url)
+        if ok:
+            QtWidgets.QMessageBox.information(
+                self, "Kết nối thành công", f"Máy chủ phản hồi OK (phiên bản: {info or 'không rõ'}).")
+        else:
+            QtWidgets.QMessageBox.critical(self, "Không kết nối được", str(info))
+
+    def save_and_restart(self):
+        role = "client" if self.rb_client.isChecked() else "single"
+
+        cfg = {"role": role}
+        if role == "client":
+            url = self.server_url_edit.text().strip()
+            if not url:
+                QtWidgets.QMessageBox.warning(self, "Thiếu địa chỉ", "Vui lòng nhập địa chỉ máy chủ.")
+                return
+            if not url.startswith("http"):
+                url = "http://" + url
+            cfg["server_url"] = url
+
+        save_lan_config(cfg)
+        reply = QtWidgets.QMessageBox.question(
+            self, "Khởi động lại",
+            "Đã lưu cài đặt. Cần khởi động lại ứng dụng để áp dụng đầy đủ. Khởi động lại ngay?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            restart_app()
+
+
+# ------------------------------------------------------------------
 # Cua so chinh
 # ------------------------------------------------------------------
 
@@ -1450,11 +1699,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.data_tab = DataTab(self)
         self.dedup_tab = DedupTab(self)
         self.sql_tab = SqlTab(self)
+        self.stats_tab = StatsTab(self)
+        self.network_tab = NetworkTab(self)
 
         tabs.addTab(self.import_tab, "Nhập dữ liệu")
         tabs.addTab(self.data_tab, "Danh sách")
         tabs.addTab(self.dedup_tab, "Lọc trùng")
         tabs.addTab(self.sql_tab, "Truy vấn SQL")
+        tabs.addTab(self.stats_tab, "Thống kê")
+        tabs.addTab(self.network_tab, "Mạng LAN")
         central_layout.addWidget(tabs)
         self.setCentralWidget(central)
 
@@ -1468,11 +1721,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def refresh_status(self):
         n = record_count()
-        self.status_label.setText(f"  CSDL: {DB_PATH}   |   Tổng số bản ghi: {n:,}")
+        if core.is_remote():
+            target = f"Máy trạm — máy chủ: {core.REMOTE_BASE_URL}"
+        else:
+            target = f"CSDL: {DB_PATH}"
+        self.status_label.setText(f"  {target}   |   Tổng số bản ghi: {n:,}")
 
     def on_data_changed(self):
         self.refresh_status()
         self.data_tab.reload()
+        self.stats_tab.mark_stale()
 
     def on_update_available(self, remote_version):
         self.update_banner_label.setText(
@@ -1658,6 +1916,10 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(STYLE_SHEET)
+
+    lan_cfg = load_lan_config()
+    if lan_cfg.get("role") == "client":
+        core.configure_remote(lan_cfg.get("server_url", ""), lan_cfg.get("api_key", ""))
 
     if has_password():
         login = LoginDialog()

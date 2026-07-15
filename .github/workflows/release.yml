@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    # Cho phep chay thu cong tu tab Actions (khong can day tag) - dung khi
+    # muon build thu 1 lan de kiem tra truoc khi tag chinh thuc. Phien ban
+    # lay tu VERSION.txt trong repo (khac voi khi chay qua tag, lay tu ten tag).
 
 permissions:
   contents: write
@@ -24,25 +28,39 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Xac dinh phien ban va tag
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = (Get-Content VERSION.txt -Raw).Trim()
+            $tag = "v$version"
+          } else {
+            $tag = "${{ github.ref_name }}"
+            $version = $tag -replace '^v', ''
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+
       - name: Build exe
         run: |
           python -m PyInstaller --noconfirm --onedir --windowed --name QuanLyBenhNhanTHA --distpath dist --workpath build app.py
 
       - name: Zip build output (ban portable, cau truc phang)
         run: |
-          Compress-Archive -Path dist\QuanLyBenhNhanTHA\* -DestinationPath QuanLyBenhNhanTHA-${{ github.ref_name }}.zip
+          Compress-Archive -Path dist\QuanLyBenhNhanTHA\* -DestinationPath QuanLyBenhNhanTHA-${{ steps.ver.outputs.tag }}.zip
 
       - name: Build installer (Setup.exe) voi Inno Setup
         run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=$version setup.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.ver.outputs.version }} setup.iss
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ github.ref_name }} `
-            "QuanLyBenhNhanTHA-${{ github.ref_name }}.zip" `
+          gh release create ${{ steps.ver.outputs.tag }} `
+            --target ${{ github.sha }} `
+            "QuanLyBenhNhanTHA-${{ steps.ver.outputs.tag }}.zip" `
             "setup_output\QuanLyBenhNhanTHA-Setup-*.exe" `
-            --title "QuanLyBenhNhanTHA ${{ github.ref_name }}" `
+            --title "QuanLyBenhNhanTHA ${{ steps.ver.outputs.tag }}" `
             --notes "Ban cap nhat duoc build tu dong boi GitHub Actions tu commit ${{ github.sha }}.`n`n- **QuanLyBenhNhanTHA-Setup-*.exe**: file cai dat, dung cho lan dau tien tren may moi (khuyen nghi).`n- **QuanLyBenhNhanTHA-*.zip**: ban portable, giai nen la chay duoc, dung de tu cap nhat thu cong neu can."

@@ -3,6 +3,8 @@
 *.xls
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 *.db.backup*
 danh_sach_*.csv
 ket_qua_truy_van.csv
@@ -10,11 +12,14 @@ ket_qua_truy_van.csv
 # Token cap nhat & mat khau ung dung (bi mat, khong chia se)
 update_token.txt
 app_password.hash
+lan_config.json
 backups/
 
 # Build artifacts
 build/
 dist/
+build_server/
+dist_server/
 setup_output/
 *.spec
 __pycache__/
