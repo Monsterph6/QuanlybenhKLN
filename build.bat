@@ -2,6 +2,7 @@
 cd /d "%~dp0"
 echo Dang dong goi QuanLyBenhNhanTHA.exe ...
 python -m PyInstaller --noconfirm --onedir --windowed ^
+    --exclude-module numpy ^
     --name QuanLyBenhNhanTHA ^
     --distpath dist ^
     --workpath build ^

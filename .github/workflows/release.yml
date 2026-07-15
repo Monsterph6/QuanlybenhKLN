@@ -44,7 +44,7 @@ jobs:
 
       - name: Build exe
         run: |
-          python -m PyInstaller --noconfirm --onedir --windowed --name QuanLyBenhNhanTHA --distpath dist --workpath build app.py
+          python -m PyInstaller --noconfirm --onedir --windowed --exclude-module numpy --name QuanLyBenhNhanTHA --distpath dist --workpath build app.py
 
       - name: Zip build output (ban portable, cau truc phang)
         run: |

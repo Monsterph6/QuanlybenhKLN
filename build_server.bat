@@ -8,14 +8,16 @@ if exist dist_server_raw rmdir /s /q dist_server_raw
 if exist dist_server rmdir /s /q dist_server
 
 python -m PyInstaller --noconfirm --onedir --console ^
-    --hidden-import=win32timezone --contents-directory _internal_service ^
+    --hidden-import=win32timezone --exclude-module numpy --exclude-module openpyxl ^
+    --contents-directory _internal_service ^
     --name QuanLyBenhNhanTHA-Service ^
     --distpath dist_server_raw --workpath build_server ^
     service.py
 if errorlevel 1 goto :error
 
 python -m PyInstaller --noconfirm --onedir --windowed ^
-    --hidden-import=win32timezone --contents-directory _internal_tray ^
+    --hidden-import=win32timezone --exclude-module numpy --exclude-module openpyxl ^
+    --contents-directory _internal_tray ^
     --name QuanLyBenhNhanTHA-Tray ^
     --distpath dist_server_raw --workpath build_server ^
     server_tray.py
