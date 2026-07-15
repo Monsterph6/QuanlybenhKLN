@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "server-v*.*.*"
+  workflow_dispatch:
+    # Cho phep chay thu cong tu tab Actions (khong can day tag) - dung khi
+    # muon build thu 1 lan de kiem tra truoc khi tag chinh thuc. Phien ban
+    # lay tu VERSION_SERVER.txt trong repo (khac voi khi chay qua tag, lay
+    # tu ten tag).
 
 permissions:
   contents: write
@@ -24,6 +29,20 @@ jobs:
           pip install -r requirements-server.txt
           pip install pyinstaller
 
+      - name: Xac dinh phien ban va tag
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = (Get-Content VERSION_SERVER.txt -Raw).Trim()
+            $tag = "server-v$version"
+          } else {
+            $tag = "${{ github.ref_name }}"
+            $version = $tag -replace '^server-v', ''
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+
       - name: Build Service + Tray exe
         run: |
           python -m PyInstaller --noconfirm --onedir --console --hidden-import=win32timezone --contents-directory _internal_service --name QuanLyBenhNhanTHA-Service --distpath dist_server_raw --workpath build_server service.py
@@ -38,19 +57,19 @@ jobs:
 
       - name: Zip build output (ban portable, cau truc phang)
         run: |
-          Compress-Archive -Path dist_server\* -DestinationPath QuanLyBenhNhanTHA-Server-${{ github.ref_name }}.zip
+          Compress-Archive -Path dist_server\* -DestinationPath QuanLyBenhNhanTHA-Server-${{ steps.ver.outputs.tag }}.zip
 
       - name: Build installer (Setup.exe) voi Inno Setup
         run: |
-          $version = "${{ github.ref_name }}" -replace '^server-v', ''
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=$version setup_server.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=${{ steps.ver.outputs.version }} setup_server.iss
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ github.ref_name }} `
-            "QuanLyBenhNhanTHA-Server-${{ github.ref_name }}.zip" `
+          gh release create ${{ steps.ver.outputs.tag }} `
+            --target ${{ github.sha }} `
+            "QuanLyBenhNhanTHA-Server-${{ steps.ver.outputs.tag }}.zip" `
             "setup_output\QuanLyBenhNhanTHA-Server-Setup-*.exe" `
-            --title "QuanLyBenhNhanTHA Server ${{ github.ref_name }}" `
+            --title "QuanLyBenhNhanTHA Server ${{ steps.ver.outputs.tag }}" `
             --notes "Ban cap nhat goi MAY CHU (Windows Service + tray helper) duoc build tu dong tu commit ${{ github.sha }}. Day la dong phien ban RIENG voi ung dung may tram (tag 'v*.*.*').`n`n- **QuanLyBenhNhanTHA-Server-Setup-*.exe**: file cai dat (dung Inno Setup, tu hoi cong LAN va tu cai/bat Windows Service, can quyen Administrator) - dung cho lan dau tien tren may moi (khuyen nghi).`n- **QuanLyBenhNhanTHA-Server-*.zip**: ban portable, dung lam nguon cho update_server.bat tu tai khi co ban moi, hoac cai thu cong qua install_server.bat."
