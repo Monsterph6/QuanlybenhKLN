@@ -131,6 +131,38 @@ def is_remote():
 
 
 # ------------------------------------------------------------------
+# Kiem soat IP ket noi toi may chu LAN (whitelist) - chi dung o phia may
+# chu (netserver.py kiem tra, server_tray.py quan ly qua menu "Quản lý IP
+# được phép kết nối"). Khong lien quan gi toi may tram.
+# ------------------------------------------------------------------
+
+ACL_CONFIG_FILE = os.path.join(BASE_DIR, "acl_config.json")
+
+
+def load_acl_config():
+    """Doc cau hinh kiem soat IP da luu, vi du:
+    {"mode": "allow_all", "allowed_ips": []}
+    {"mode": "whitelist", "allowed_ips": ["192.168.1.11", "192.168.1.12"]}
+    mode mac dinh "allow_all" (khong gioi han - giu hanh vi cu neu chua
+    tung cau hinh)."""
+    if os.path.exists(ACL_CONFIG_FILE):
+        try:
+            with open(ACL_CONFIG_FILE, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            cfg.setdefault("mode", "allow_all")
+            cfg.setdefault("allowed_ips", [])
+            return cfg
+        except (OSError, ValueError):
+            pass
+    return {"mode": "allow_all", "allowed_ips": []}
+
+
+def save_acl_config(cfg):
+    with open(ACL_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+# ------------------------------------------------------------------
 # Tang du lieu (DB)
 # ------------------------------------------------------------------
 

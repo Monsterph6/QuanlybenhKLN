@@ -13,6 +13,7 @@ ket_qua_truy_van.csv
 update_token.txt
 app_password.hash
 lan_config.json
+acl_config.json
 backups/
 
 # Build artifacts
