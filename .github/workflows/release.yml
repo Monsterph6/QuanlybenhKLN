@@ -42,9 +42,18 @@ jobs:
           echo "version=$version" >> $env:GITHUB_OUTPUT
           echo "tag=$tag" >> $env:GITHUB_OUTPUT
 
-      - name: Build exe
+      - name: Build app + Service + Tray exe
         run: |
-          python -m PyInstaller --noconfirm --onedir --windowed --exclude-module numpy --name QuanLyBenhNhanTHA --distpath dist --workpath build app.py
+          python -m PyInstaller --noconfirm --onedir --windowed --exclude-module numpy --name QuanLyBenhNhanTHA --distpath dist_raw --workpath build app.py
+          python -m PyInstaller --noconfirm --onedir --console --hidden-import=win32timezone --exclude-module numpy --exclude-module openpyxl --contents-directory _internal_service --name QuanLyBenhNhanTHA-Service --distpath dist_raw --workpath build service.py
+          python -m PyInstaller --noconfirm --onedir --windowed --hidden-import=win32timezone --exclude-module numpy --exclude-module openpyxl --contents-directory _internal_tray --name QuanLyBenhNhanTHA-Tray --distpath dist_raw --workpath build server_tray.py
+
+      - name: Gom tat ca vao 1 thu muc dist\QuanLyBenhNhanTHA\
+        run: |
+          New-Item -ItemType Directory -Path dist\QuanLyBenhNhanTHA | Out-Null
+          Copy-Item dist_raw\QuanLyBenhNhanTHA\* dist\QuanLyBenhNhanTHA\ -Recurse
+          Copy-Item dist_raw\QuanLyBenhNhanTHA-Service\* dist\QuanLyBenhNhanTHA\ -Recurse
+          Copy-Item dist_raw\QuanLyBenhNhanTHA-Tray\* dist\QuanLyBenhNhanTHA\ -Recurse
 
       - name: Zip build output (ban portable, cau truc phang)
         run: |
@@ -63,4 +72,4 @@ jobs:
             "QuanLyBenhNhanTHA-${{ steps.ver.outputs.tag }}.zip" `
             "setup_output\QuanLyBenhNhanTHA-Setup-*.exe" `
             --title "QuanLyBenhNhanTHA ${{ steps.ver.outputs.tag }}" `
-            --notes "Ban cap nhat duoc build tu dong boi GitHub Actions tu commit ${{ github.sha }}.`n`n- **QuanLyBenhNhanTHA-Setup-*.exe**: file cai dat, dung cho lan dau tien tren may moi (khuyen nghi).`n- **QuanLyBenhNhanTHA-*.zip**: ban portable, giai nen la chay duoc, dung de tu cap nhat thu cong neu can."
+            --notes "Ban cap nhat duoc build tu dong boi GitHub Actions tu commit ${{ github.sha }}. Gom ca ung dung chinh lan thanh phan May chu (Windows Service chia se qua mang LAN) trong 1 file cai dat duy nhat - khi cai dat se hoi chon vai tro: Mot may / May tram / May chu.`n`n- **QuanLyBenhNhanTHA-Setup-*.exe**: file cai dat (can quyen Administrator), dung cho lan dau tien tren may moi (khuyen nghi).`n- **QuanLyBenhNhanTHA-*.zip**: ban portable, giai nen la chay duoc, dung de tu cap nhat thu cong neu can."

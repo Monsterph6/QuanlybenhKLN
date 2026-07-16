@@ -3,20 +3,24 @@
 Ứng dụng desktop offline (Python + SQLite + giao diện PyQt6) để nhập danh sách
 bệnh nhân từ Excel, lưu trữ, lọc trùng và xuất kết quả ra Excel/CSV.
 
-Có 2 thành phần riêng biệt, đóng gói và cài đặt độc lập với nhau:
-- **Ứng dụng chính (`app.py`)** — giao diện PyQt6 dùng hằng ngày, cài trên mọi
-  máy (kể cả khi chỉ dùng 1 máy duy nhất, không chia sẻ qua mạng).
-- **Máy chủ chia sẻ mạng LAN (`service.py` + `server_tray.py`)** — gói riêng,
-  KHÔNG dùng PyQt6 nên nhẹ hơn nhiều, chỉ cài trên 1 máy khi cần nhiều máy
-  dùng chung 1 CSDL qua mạng nội bộ. Xem mục "Máy chủ chia sẻ mạng LAN" bên dưới.
+Chỉ có **1 bộ cài đặt duy nhất** — khi cài, trình cài đặt sẽ hỏi vai trò của
+máy này:
+- **Một máy** — dùng độc lập, không chia sẻ qua mạng (mặc định).
+- **Máy trạm** — kết nối tới 1 máy chủ khác đã có sẵn trong mạng LAN nội bộ.
+- **Máy chủ** — chia sẻ dữ liệu của máy này cho các máy khác trong mạng LAN
+  (máy này vẫn dùng được giao diện chính bình thường, đồng thời có thêm 1
+  Windows Service chạy ngầm để các máy trạm kết nối vào). Xem mục "Chia sẻ
+  dữ liệu cho nhiều máy" bên dưới.
 
 Mã nguồn gồm:
 - `core.py` — tầng dữ liệu: SQLite, đọc/chuẩn hóa Excel, xuất Excel/CSV (không phụ thuộc giao diện).
 - `app.py` — giao diện PyQt6 (nhập `core.py` để xử lý dữ liệu).
 - `netserver.py` / `netclient.py` — tầng giao tiếp qua mạng LAN dùng chung bởi
   cả máy chủ và máy trạm, chỉ dùng thư viện chuẩn Python.
-- `service.py` / `server_tray.py` — thành phần "máy chủ" (Windows Service +
-  tray helper), xem mục riêng bên dưới.
+- `service.py` / `server_tray.py` — thành phần chạy ngầm khi máy này được
+  chọn vai trò "Máy chủ" lúc cài đặt (Windows Service + tray helper), xem
+  mục "Chia sẻ dữ liệu cho nhiều máy" bên dưới. Được đóng gói cùng 1 file
+  cài đặt với ứng dụng chính, không phải bộ cài riêng.
 
 ## Yêu cầu
 
@@ -127,7 +131,7 @@ Việc gộp/xóa hàng loạt đều tự động sao lưu CSDL trước khi th
 
 **Trình tạo câu lệnh SQL (không cần biết cú pháp):** bấm vào ô có dấu tích ở
 đầu để mở rộng. Chọn các cột muốn hiển thị, thêm điều kiện lọc (chọn trường —
-toan tu như "bằng", "chứa", "lớn hơn", "để trống"... — nhập giá trị), tùy chọn
+toán tử như "bằng", "chứa", "lớn hơn", "để trống"... — nhập giá trị), tùy chọn
 nhóm theo 1 cột (tự thêm đếm số lượng), sắp xếp và giới hạn số dòng, rồi bấm
 **Tạo câu lệnh SQL** — câu lệnh sinh ra sẽ tự động điền vào khung soạn thảo bên
 dưới và chạy luôn, có thể chỉnh sửa lại nếu cần trước khi chạy lại.
@@ -199,9 +203,11 @@ ra từ đó, dùng để lọc/thống kê theo từng loại bệnh.
 
 ### 6. Tab "Mạng LAN"
 
-Dùng khi máy này cần dùng chung dữ liệu với 1 **máy chủ** đã được cài riêng
-trong cùng mạng LAN nội bộ (xem mục "Máy chủ chia sẻ mạng LAN" bên dưới —
-máy chủ là 1 gói cài đặt khác, không nằm trong ứng dụng chính này).
+Dùng khi máy này cần dùng chung dữ liệu với 1 **máy chủ** đã có sẵn trong cùng
+mạng LAN nội bộ (xem mục "Máy chủ chia sẻ mạng LAN" bên dưới). Tab này chỉ hỗ
+trợ đổi qua lại giữa 2 vai trò **Một máy** ↔ **Máy trạm**; vai trò **Máy chủ**
+chỉ chọn được lúc cài đặt (xem mục bên dưới) — máy đang chạy vai trò Máy chủ
+sẽ không đổi được vai trò trong tab này, muốn đổi thì chạy lại trình cài đặt.
 
 - **Một máy (mặc định)**: hoạt động độc lập như trước đây, không chia sẻ.
 - **Máy trạm**: nhập đúng địa chỉ máy chủ (bấm **Kiểm tra kết nối** để thử
@@ -218,67 +224,55 @@ giới hạn phía máy trạm chỉ cho gõ `SELECT`, nhưng máy chủ không 
 điều đó). Chỉ dùng tính năng này trong mạng nội bộ đáng tin cậy (không có
 Wi-Fi khách lạ dùng chung).
 
-## Máy chủ chia sẻ mạng LAN (gói cài đặt riêng)
+## Máy chủ chia sẻ mạng LAN
 
 Khi nhiều máy trong cùng một trạm y tế cần dùng chung 1 CSDL, **một máy** (máy
-"để bàn", luôn bật) đóng vai trò máy chủ. Máy chủ là **chương trình độc lập**
-với ứng dụng chính — không dùng PyQt6 nên nhẹ hơn nhiều lần, chạy hoàn toàn
-ngầm (không cửa sổ), tự khởi động cùng Windows và tự khởi động lại nếu bị lỗi,
-kể cả trước khi có ai đăng nhập vào máy — vì nó chạy dưới dạng **Windows
-Service** thật sự, không phải chỉ là 1 ứng dụng thường được thêm vào Startup.
+"để bàn", luôn bật) đóng vai trò máy chủ. Vai trò này được chọn **ngay trong
+bộ cài đặt duy nhất** của ứng dụng (xem mục "Cài đặt máy chủ" bên dưới) — khi
+chọn vai trò **Máy chủ**, ứng dụng chính vẫn dùng được giao diện bình thường
+trên máy đó như 1 máy đơn lẻ, đồng thời cài thêm 2 thành phần chạy nền để chia
+sẻ CSDL đó cho các máy trạm khác qua mạng LAN:
 
-Gồm 2 chương trình tách biệt:
-- **`service.py`** — Windows Service thực sự, làm việc chính (chia sẻ dữ liệu
-  qua mạng). Không có giao diện gì — theo đúng bản chất của Windows Service
+- **`service.py`** (đóng gói thành `QuanLyBenhNhanTHA-Service.exe`) — Windows
+  Service thực sự, làm việc chính (chia sẻ dữ liệu qua mạng), tự khởi động
+  cùng Windows và tự khởi động lại nếu bị lỗi, kể cả trước khi có ai đăng nhập
+  vào máy. Không có giao diện gì — theo đúng bản chất của Windows Service
   (chạy trong phiên hệ thống riêng, tách biệt khỏi màn hình desktop, nên về
   nguyên tắc không thể tự hiện cửa sổ/icon được).
-- **`server_tray.py`** — "bảng điều khiển" nhỏ, chạy trong phiên đăng nhập của
-  người dùng, hiện 1 icon ở khay hệ thống (chấm xanh = đang chia sẻ, đỏ = đang
-  dừng) để xem địa chỉ IP:cổng hiện tại, bật/dừng dịch vụ, bật/tắt tự khởi
-  động cùng Windows cho chính icon tray này (dịch vụ tự khởi động cùng máy độc
-  lập với tray, xem bên dưới), xem **danh sách máy trạm đang kết nối** (kèm
-  nút ngắt 1 kết nối cụ thể), và **giới hạn IP được phép kết nối** (whitelist)
-  — xem mục "Quản lý kết nối & giới hạn IP" bên dưới. Đóng icon tray (nút
-  "Thoát") **không** làm dừng việc chia sẻ — dịch vụ vẫn chạy ngầm bình thường.
+- **`server_tray.py`** (đóng gói thành `QuanLyBenhNhanTHA-Tray.exe`) — "bảng
+  điều khiển" nhỏ, chạy trong phiên đăng nhập của người dùng, hiện 1 icon ở
+  khay hệ thống (chấm xanh = đang chia sẻ, đỏ = đang dừng) để xem địa chỉ
+  IP:cổng hiện tại, bật/dừng dịch vụ, bật/tắt tự khởi động cùng Windows cho
+  chính icon tray này (dịch vụ tự khởi động cùng máy độc lập với tray, xem bên
+  dưới), xem **danh sách máy trạm đang kết nối** (kèm nút ngắt 1 kết nối cụ
+  thể), và **giới hạn IP được phép kết nối** (whitelist) — xem mục "Quản lý
+  kết nối & giới hạn IP" bên dưới. Đóng icon tray (nút "Thoát") **không** làm
+  dừng việc chia sẻ — dịch vụ vẫn chạy ngầm bình thường.
 
 ### Cài đặt máy chủ
 
-**Cách 1 — dùng file cài đặt (khuyến nghị, không cần Python trên máy đích):**
-
-Tải **`QuanLyBenhNhanTHA-Server-Setup-server-vX.Y.Z.exe`** ở trang Releases,
-chạy file đó (Windows sẽ tự hỏi quyền Administrator — bắt buộc, vì cài Windows
-Service cần quyền này). Trình cài đặt sẽ:
+Tải **`QuanLyBenhNhanTHA-Setup-vX.Y.Z.exe`** ở trang Releases (bộ cài đặt duy
+nhất, dùng chung cho cả 3 vai trò), chạy file đó (Windows sẽ tự hỏi quyền
+Administrator — bắt buộc, vì có thể cần cài Windows Service). Ở bước chọn
+**"Vai trò của máy này"**, chọn **Máy chủ**. Trình cài đặt sẽ:
 1. Hỏi **cổng chia sẻ** (mặc định `8765`, để trống thì cũng dùng `8765`).
-2. Tự cài và bật Windows Service, tự tạo `lan_config.json` với cổng đã chọn.
-3. Sau khi cài xong, tự mở icon khay hệ thống (`server_tray.py` /
-   `QuanLyBenhNhanTHA-Tray.exe`) — **ghi lại địa chỉ IP:cổng hiển thị ở đó**
-   (menu chuột phải icon, hoặc rê chuột vào icon) để cung cấp cho các máy
-   trạm. Bấm menu "Khởi động cùng Windows" nếu muốn icon tray tự mở lại mỗi
-   lần có người đăng nhập vào máy chủ (dịch vụ chia sẻ vẫn luôn chạy dù có
-   tray hay không).
+2. Cài đặt bình thường như 1 máy đơn lẻ, đồng thời tự cài và bật Windows
+   Service, tự tạo `lan_config.json` với cổng đã chọn.
+3. Sau khi cài xong, tự mở icon khay hệ thống (`QuanLyBenhNhanTHA-Tray.exe`) —
+   **ghi lại địa chỉ IP:cổng hiển thị ở đó** (menu chuột phải icon, hoặc rê
+   chuột vào icon) để cung cấp cho các máy trạm. Bấm menu "Khởi động cùng
+   Windows" nếu muốn icon tray tự mở lại mỗi lần có người đăng nhập vào máy
+   chủ (dịch vụ chia sẻ vẫn luôn chạy dù có tray hay không).
 
 Gỡ cài đặt qua Start Menu hoặc Settings → Apps như phần mềm bình thường (tự
-dừng và gỡ Windows Service, **không** xóa `benh_nhan.db`/`backups/`).
+dừng và gỡ Windows Service nếu có, **không** xóa `benh_nhan.db`/`backups/`).
 
-**Cách 2 — cài thủ công từ mã nguồn hoặc bản portable (nếu không dùng file cài đặt):**
+Muốn đổi cổng chia sẻ sau khi đã cài: dừng dịch vụ, sửa số cổng trong
+`lan_config.json` bằng Notepad, rồi bật lại dịch vụ (`services.msc` → restart
+dịch vụ `QuanLyBenhNhanTHA_Server`).
 
-1. Trên máy sẽ làm máy chủ, cài thư viện riêng cho máy chủ (khác với
-   `requirements.txt` của ứng dụng chính):
-   ```
-   pip install -r requirements-server.txt
-   ```
-2. Chuột phải vào `install_server.bat` → **Run as administrator**. Script sẽ
-   tự tạo `lan_config.json` với cổng mặc định `8765` nếu chưa có, cài và bật
-   dịch vụ.
-3. (Tuỳ chọn) Chạy `server_tray.py` để xem icon trạng thái ở khay hệ thống.
-
-Muốn đổi cổng (cả 2 cách): dừng dịch vụ, sửa số cổng trong `lan_config.json`
-bằng Notepad, bật lại dịch vụ (`services.msc` → restart dịch vụ
-`QuanLyBenhNhanTHA_Server`, hoặc `uninstall_server.bat` rồi `install_server.bat`
-nếu cài theo Cách 2).
-
-Muốn gỡ theo Cách 2: chuột phải `uninstall_server.bat` → **Run as administrator**.
-Dữ liệu `benh_nhan.db` và `backups/` không bị xóa ở cả 2 cách.
+Muốn đổi vai trò của máy (ví dụ từ Một máy sang Máy chủ, hoặc ngược lại): chạy
+lại trình cài đặt và chọn vai trò mới.
 
 ### Quản lý kết nối & giới hạn IP (whitelist)
 
@@ -304,41 +298,40 @@ tính năng này. Có thể dùng kèm khoá API (`api_key` trong `lan_config.js
 
 ### Đóng gói máy chủ (build từ mã nguồn)
 
-Tương tự `build.bat` của ứng dụng chính:
+Dùng chung `build.bat` với ứng dụng chính — script này build cả 3 thành phần
+(ứng dụng chính, Service, Tray) rồi gom vào 1 thư mục `dist\QuanLyBenhNhanTHA\`
+duy nhất:
 ```
-build_server.bat
+build.bat
 ```
-Kết quả nằm gọn trong 1 thư mục `dist_server\` (gồm cả Service, Tray,
-`install_server.bat`, `uninstall_server.bat`, `update_server.bat`). Muốn build
-luôn file cài đặt (giống Cách 1 ở trên) thì cần cài
+Muốn build luôn file cài đặt (giống mục "Cài đặt máy chủ" ở trên) thì cần cài
 [Inno Setup 6](https://jrsoftware.org/isinfo.php) rồi chạy:
 ```
-"C:\Users\<ten_may>\AppData\Local\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=0.1.0 setup_server.iss
+"C:\Users\<ten_may>\AppData\Local\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.3.0 setup.iss
 ```
-Kết quả nằm ở `setup_output\QuanLyBenhNhanTHA-Server-Setup-0.1.0.exe`. Muốn cài
-trực tiếp từ `dist_server\` không qua trình cài đặt thì chạy
-`dist_server\install_server.bat` (chuột phải → Run as administrator).
+Kết quả nằm ở `setup_output\QuanLyBenhNhanTHA-Setup-1.3.0.exe` — chạy file đó
+và chọn vai trò **Máy chủ** ở bước cài đặt.
 
 ### Cập nhật máy chủ lên bản mới
 
-Máy chủ có **dòng phiên bản riêng** với ứng dụng máy trạm — xem `VERSION_SERVER.txt`
-(so với `VERSION.txt` của máy trạm) và tag GitHub dạng `server-vX.Y.Z` (so với
-`vX.Y.Z` của máy trạm). Hai dòng cập nhật độc lập, không ảnh hưởng lẫn nhau.
+Dùng chung 1 dòng phiên bản (`VERSION.txt`, tag GitHub dạng `vX.Y.Z`) với ứng
+dụng chính — không còn dòng cập nhật riêng cho máy chủ.
 
-Trên máy chủ đã cài từ bản đóng gói (`dist_server\...`), chuột phải
-`update_server.bat` → **Run as administrator**. Script sẽ tự dừng dịch vụ, thay
-file Service/Tray bằng bản mới, rồi bật lại dịch vụ — dữ liệu `benh_nhan.db`,
-`lan_config.json`, `acl_config.json`, `backups\` không bị ảnh hưởng. Repo đang
-Public nên không cần Personal Access Token (để trống khi được hỏi) — xem mục
-D bên dưới nếu sau này repo bị chuyển lại về Private.
+Trên máy đã cài với vai trò Máy chủ, chuột phải `update.bat` → **Run as
+administrator** (bắt buộc với vai trò Máy chủ, vì cần quyền dừng/bật lại
+Windows Service). Script (`update.ps1`) sẽ tự nhận ra máy này đang ở vai trò
+Máy chủ (nhờ có sẵn `QuanLyBenhNhanTHA-Service.exe`), tự dừng dịch vụ, thay
+file ứng dụng chính lẫn Service/Tray bằng bản mới, rồi bật lại dịch vụ — dữ
+liệu `benh_nhan.db`, `lan_config.json`, `acl_config.json`, `backups\` không bị
+ảnh hưởng. Repo đang Public nên không cần Personal Access Token (để trống khi
+được hỏi) — xem mục D bên dưới nếu sau này repo bị chuyển lại về Private.
 
-> **Lưu ý:** phần Windows Service (`service.py`, `server_tray.py`,
-> `update_server.ps1`, `setup_server.iss`) chỉ chạy được trên Windows và cần
-> thư viện `pywin32`/`pystray` — chưa được kiểm thử trên máy Windows thật
-> (được viết theo đúng mẫu chuẩn của pywin32/pystray/Inno Setup và đã kiểm tra
-> cú pháp, nhưng nên tự kiểm thử kỹ trên 1 máy Windows trước khi dùng cho dữ
-> liệu bệnh nhân thật — đặc biệt là bước cài đặt Windows Service tự động qua
-> `setup_server.iss`).
+> **Lưu ý:** phần Windows Service (`service.py`, `server_tray.py`) chỉ chạy
+> được trên Windows và cần thư viện `pywin32`/`pystray` — chưa được kiểm thử
+> trên máy Windows thật (được viết theo đúng mẫu chuẩn của pywin32/pystray/Inno
+> Setup và đã kiểm tra cú pháp, nhưng nên tự kiểm thử kỹ trên 1 máy Windows
+> trước khi dùng cho dữ liệu bệnh nhân thật — đặc biệt là bước cài đặt Windows
+> Service tự động qua `setup.iss`).
 
 ## Cấu trúc dữ liệu trong CSDL (bảng `patients`)
 
@@ -432,48 +425,31 @@ git tag v1.0.1
 git push origin v1.0.1
 ```
 Khi tag `v*.*.*` được đẩy lên, **GitHub Actions** (`.github/workflows/release.yml`)
-tự động: build file .exe bằng PyInstaller trên máy ảo Windows của GitHub, đóng
-gói thành **2 file** rồi tạo 1 **Release** đính kèm cả hai:
-- `QuanLyBenhNhanTHA-Setup-vX.Y.Z.exe` — file **cài đặt** (dùng Inno Setup),
-  dùng cho lần đầu tiên trên máy mới.
-- `QuanLyBenhNhanTHA-vX.Y.Z.zip` — bản **portable** (giải nén là chạy được),
-  dùng làm nguồn cho `update.bat` tự tải khi có bản mới.
+tự động: build **cả 3 thành phần** (ứng dụng chính, Service, Tray) bằng
+PyInstaller trên máy ảo Windows của GitHub, gom vào 1 thư mục
+`dist\QuanLyBenhNhanTHA\` duy nhất, đóng gói thành **2 file** rồi tạo 1
+**Release** đính kèm cả hai:
+- `QuanLyBenhNhanTHA-Setup-vX.Y.Z.exe` — file **cài đặt** duy nhất (dùng Inno
+  Setup) cho cả 3 vai trò (Một máy / Máy trạm / Máy chủ), dùng cho lần đầu
+  tiên trên máy mới.
+- `QuanLyBenhNhanTHA-vX.Y.Z.zip` — bản **portable** (giải nén là chạy được,
+  gồm cả file `.exe` của Service/Tray dùng cho vai trò Máy chủ), dùng làm
+  nguồn cho `update.bat` tự tải khi có bản mới.
 
 Theo dõi tiến trình tại tab **Actions** trên trang GitHub của repo.
-
-**Riêng cho gói máy chủ** (xem mục "Máy chủ chia sẻ mạng LAN" ở trên): quy
-trình tương tự nhưng dùng file version/tag khác, để 2 dòng phiên bản độc lập
-với nhau (build/update xong máy trạm không bắt máy chủ phải cập nhật theo và
-ngược lại):
-```
-# Sua code, cap nhat so phien ban trong VERSION_SERVER.txt (vd: 0.1.1)
-git add .
-git commit -m "Mo ta thay doi"
-git push
-
-git tag server-v0.1.1
-git push origin server-v0.1.1
-```
-Tag `server-v*.*.*` kích hoạt workflow riêng
-(`.github/workflows/release-server.yml`), build `service.py` + `server_tray.py`,
-tạo 1 Release riêng đính kèm **2 file** (giống cấu trúc release máy trạm):
-- `QuanLyBenhNhanTHA-Server-Setup-server-vX.Y.Z.exe` — file **cài đặt** (dùng
-  Inno Setup, script `setup_server.iss`) — tự hỏi cổng LAN, tự cài/bật Windows
-  Service, cần quyền Administrator.
-- `QuanLyBenhNhanTHA-Server-server-vX.Y.Z.zip` — bản **portable**, dùng làm
-  nguồn cho `update_server.bat` tự tải khi có bản mới, hoặc cài thủ công qua
-  `install_server.bat`.
 
 **3. Build thử trên máy mình (không bắt buộc, chỉ để kiểm tra trước khi tag):**
 ```
 build.bat
 ```
-Kết quả nằm ở `dist\QuanLyBenhNhanTHA\QuanLyBenhNhanTHA.exe`. Muốn build luôn
-file cài đặt thì cần cài [Inno Setup 6](https://jrsoftware.org/isinfo.php) rồi chạy:
+Kết quả nằm ở `dist\QuanLyBenhNhanTHA\QuanLyBenhNhanTHA.exe` (cùng thư mục có
+sẵn `QuanLyBenhNhanTHA-Service.exe` / `-Tray.exe` cho vai trò Máy chủ). Muốn
+build luôn file cài đặt thì cần cài
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) rồi chạy:
 ```
-"C:\Users\<ten_may>\AppData\Local\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.0.0 setup.iss
+"C:\Users\<ten_may>\AppData\Local\Programs\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.3.0 setup.iss
 ```
-Kết quả nằm ở `setup_output\QuanLyBenhNhanTHA-Setup-1.0.0.exe`.
+Kết quả nằm ở `setup_output\QuanLyBenhNhanTHA-Setup-1.3.0.exe`.
 
 > **Lưu ý kỹ thuật quan trọng:** khi đóng gói bằng PyInstaller, dữ liệu
 > `benh_nhan.db` phải nằm **cạnh** file `.exe`, không được nằm trong thư mục
@@ -486,45 +462,49 @@ Kết quả nằm ở `setup_output\QuanLyBenhNhanTHA-Setup-1.0.0.exe`.
 
 1. Vào trang Releases của repo, tải file **`QuanLyBenhNhanTHA-Setup-vX.Y.Z.exe`**
    mới nhất.
-2. Chạy file đó, làm theo hướng dẫn (mặc định cài vào
-   `%LOCALAPPDATA%\Programs\QuanLyBenhNhanTHA`, không cần quyền Admin). Có 1
-   bước hỏi **"Địa chỉ máy chủ"** — nếu máy này dùng chung dữ liệu với 1 máy
-   chủ đã cài trong mạng LAN (xem mục "Máy chủ chia sẻ mạng LAN" ở trên), nhập
-   địa chỉ IP:cổng của máy chủ đó vào đây; nếu dùng 1 máy độc lập thì để trống
-   rồi Next. Có thể xem/đổi lại sau trong tab "Mạng LAN" của ứng dụng, không
-   bắt buộc phải đúng ngay từ bước cài đặt. Sau khi cài xong có thể tick
-   "Chạy ngay" để mở ứng dụng luôn.
+2. Chạy file đó (Windows sẽ hỏi quyền Administrator — luôn cần, để trình cài
+   đặt có thể cài Windows Service nếu chọn vai trò Máy chủ), làm theo hướng
+   dẫn. Có 1 bước hỏi **"Vai trò của máy này"**:
+   - **Một máy** (mặc định) — dùng độc lập, không chia sẻ qua mạng.
+   - **Máy trạm** — nhập địa chỉ IP:cổng của 1 máy chủ đã có sẵn trong mạng
+     LAN (xem mục "Máy chủ chia sẻ mạng LAN" ở trên); nếu chưa biết chính xác
+     ngay, cứ để trống rồi Next, sau đó nhập/sửa lại trong tab "Mạng LAN" của
+     ứng dụng.
+   - **Máy chủ** — nhập cổng chia sẻ (mặc định `8765`); máy này vẫn dùng được
+     giao diện chính bình thường, đồng thời tự cài và bật thêm 1 Windows
+     Service chạy ngầm để chia sẻ dữ liệu cho các máy trạm khác.
+
+   Sau khi cài xong có thể tick "Chạy ngay" để mở ứng dụng luôn.
 3. Bộ cài đã kèm sẵn `update.bat`, `update.ps1`, `VERSION.txt` — có shortcut
-   "Kiểm tra cập nhật" trong Start Menu. Dữ liệu (`benh_nhan.db`, nếu dùng 1
-   máy độc lập) được tạo ngay trong thư mục cài đặt khi nhập Excel lần đầu.
+   "Kiểm tra cập nhật" trong Start Menu. Dữ liệu (`benh_nhan.db`, nếu dùng vai
+   trò Một máy hoặc Máy chủ) được tạo ngay trong thư mục cài đặt khi nhập
+   Excel lần đầu.
 
 ### C. Cập nhật lên bản mới trên máy đích
 
 Mở Start Menu → "Quản lý benh nhan THA" → **Kiểm tra cập nhật** (hoặc bấm đúp
-`update.bat` trong thư mục cài đặt). Repo đang **Public** nên không cần
-Personal Access Token — khi được hỏi, cứ để trống rồi nhấn Enter (xem mục D
-bên dưới nếu sau này repo bị chuyển lại về Private).
+`update.bat` trong thư mục cài đặt — trên máy có vai trò **Máy chủ**, chuột
+phải chọn **Run as administrator** vì cần quyền dừng/bật lại Windows Service).
+Repo đang **Public** nên không cần Personal Access Token — khi được hỏi, cứ để
+trống rồi nhấn Enter (xem mục D bên dưới nếu sau này repo bị chuyển lại về
+Private).
 
 `update.bat` sẽ tự so sánh phiên bản, tải bản portable (.zip) mới nếu có, và
-thay thế file `.exe` + thư mục `_internal` — **dữ liệu `benh_nhan.db` không bị
-ảnh hưởng** vì nó nằm ngoài `_internal`. Nếu ứng dụng đang mở, script sẽ nhắc
-đóng lại trước khi cập nhật (Windows khóa file .exe/.dll đang chạy).
+thay thế file `.exe` + thư mục `_internal` (và cả file Service/Tray nếu máy
+này đang ở vai trò Máy chủ) — **dữ liệu `benh_nhan.db`, `lan_config.json`,
+`backups\` không bị ảnh hưởng**. Nếu ứng dụng đang mở, script sẽ nhắc đóng lại
+trước khi cập nhật (Windows khóa file .exe/.dll đang chạy).
 
 **Thông báo có bản mới ngay khi mở app:** một khi đã cấu hình `update_token.txt`
 (dù chỉ cần chạy `update.bat` 1 lần để nhập token), mỗi lần mở ứng dụng sẽ tự
 kiểm tra ngầm (không chặn giao diện, không lỗi nếu mất mạng) — nếu có bản mới
 hơn sẽ hiện 1 dải thông báo màu vàng ở đầu cửa sổ, nhắc chạy `update.bat`.
 
-`update.bat` chỉ kiểm tra Release của **máy trạm** (tag `vX.Y.Z`) — máy chủ có
-cơ chế cập nhật riêng (`update_server.bat`, tag `server-vX.Y.Z`), xem mục
-"Cập nhật máy chủ lên bản mới" ở trên.
-
 ### D. Lấy Personal Access Token (chỉ cần nếu repo đang ở chế độ Private)
 
-Repo `quanlybenhnhantha` hiện đang **Public** — `update.bat`/`update_server.bat`
-hoạt động bình thường mà **không cần** token, cứ để trống khi được hỏi và
-nhấn Enter. Phần dưới đây chỉ cần làm nếu sau này repo bị chuyển lại về
-Private:
+Repo `quanlybenhnhantha` hiện đang **Public** — `update.bat` hoạt động bình
+thường mà **không cần** token, cứ để trống khi được hỏi và nhấn Enter. Phần
+dưới đây chỉ cần làm nếu sau này repo bị chuyển lại về Private:
 
 1. Đăng nhập GitHub → vào **Settings → Developer settings → Personal access
    tokens → Fine-grained tokens → Generate new token**.

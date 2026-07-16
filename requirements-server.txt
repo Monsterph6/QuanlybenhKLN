@@ -1,5 +1,0 @@
-# Chi can cai tren MAY CHU (khong can tren may tram - may tram chi can
-# requirements.txt nhu binh thuong). Xem service.py / server_tray.py.
-pywin32
-pystray
-Pillow

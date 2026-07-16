@@ -1,3 +1,6 @@
 PyQt6
 PyQt6-Charts
 openpyxl
+pywin32
+pystray
+Pillow

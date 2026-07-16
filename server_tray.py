@@ -17,7 +17,7 @@ icon o khay he thong de:
     trinh khac nhau, khong dung chung bo nho) - xem netserver.py op
     "admin_*" va core.load_acl_config()/save_acl_config().
 
-Dong cua so tray (nut "Thoát") KHONG lam dung viec chia se dang chay.
+Dong cua so tray (nut "Thoat") KHONG lam dung viec chia se dang chay.
 
 Can thu vien pystray + Pillow (xem requirements-server.txt). Cac cua so
 quan ly ket noi/whitelist dung tkinter (co san trong thu vien chuan
@@ -145,9 +145,9 @@ def _status_text(_item=None):
         cfg = core.load_lan_config()
         port = cfg.get("port", 8765)
         ip = netserver.get_local_ip()
-        return f"Đang chia sᮣ tại http://{ip}:{port}"
+        return f"Đang chia sẻ tại http://{ip}:{port}"
     if st == "stopped":
-        return "Dịch vụ đang DẮNG"
+        return "Dịch vụ đang DỪNG"
     return "Không tìm thấy dịch vụ (chưa cài đặt?)"
 
 
@@ -340,12 +340,12 @@ def main():
         pystray.MenuItem("Kết nối đang hoạt động...", show_connections),
         pystray.MenuItem("Quản lý IP được phép kết nối...", show_acl),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Bật chia sᮣ", start_service),
-        pystray.MenuItem("Dừng chia sᮣ", stop_service),
+        pystray.MenuItem("Bật chia sẻ", start_service),
+        pystray.MenuItem("Dừng chia sẻ", stop_service),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Khởi động cùng Windows", toggle_autostart,
                           checked=lambda item: is_autostart_enabled()),
-        pystray.MenuItem("Thoát (không dừng chia sᮣ)", quit_tray),
+        pystray.MenuItem("Thoát (không dừng chia sẻ)", quit_tray),
     )
     icon = pystray.Icon("QuanLyBenhNhanTHA_Tray", ICON_UNKNOWN, "Quản lý bệnh nhân THA", menu)
     threading.Thread(target=_refresh_loop, daemon=True).start()
