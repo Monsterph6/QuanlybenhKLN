@@ -121,6 +121,38 @@ def infer_diseases(chan_doan_text):
     ]
     return ", ".join(matched) if matched else DISEASE_OTHER_LABEL
 
+
+def disease_flag_labels():
+    """Danh sach nhan cot rieng cho tung nhom benh (+ 'Khác'), dung khi can
+    tach cot 'benh' (Nhóm bệnh KLN) gop thanh cac cot danh dau X/rong rieng
+    biet - de loc/thong ke theo tung nhom de hon thay vi phai doc chuoi gop
+    kieu "Tăng huyết áp, Đái tháo đường"."""
+    return [label for _, label, _ in DISEASE_CATEGORIES] + [DISEASE_OTHER_LABEL]
+
+
+def split_disease_flags(benh_text):
+    """Tra ve list 'X'/'' tuong ung voi disease_flag_labels(), dua vao noi
+    dung cot 'benh' (cac nhan cach nhau boi ", ")."""
+    labels = {s.strip() for s in (benh_text or "").split(",") if s.strip()}
+    return ["X" if label in labels else "" for label in disease_flag_labels()]
+
+
+def with_disease_flag_columns(headers, rows):
+    """Chen them cac cot danh dau rieng (X/rong) cho tung nhom benh ngay sau
+    cot 'Nhóm bệnh (KLN)' trong headers/rows co san (dung cho ca hien thi
+    bang va xuat Excel/CSV). headers phai chua nhan cot 'benh' (xem COLUMNS);
+    cac cot phu them sau do (vd 'Lịch sử khám') khong bi anh huong."""
+    benh_label = next(label for col, label in COLUMNS if col == "benh")
+    idx = headers.index(benh_label)
+    flag_labels = disease_flag_labels()
+    new_headers = list(headers[:idx + 1]) + flag_labels + list(headers[idx + 1:])
+    new_rows = []
+    for row in rows:
+        row = list(row)
+        flags = split_disease_flags(row[idx])
+        new_rows.append(tuple(row[:idx + 1] + flags + row[idx + 1:]))
+    return new_headers, new_rows
+
 # Cac truong nguoi dung co the chon (ket hop bang AND) de xac dinh "trung nhau".
 # Moi phan tu: (nhan hien thi, bieu thuc dung trong khoa gop nhom, dieu kien khac rong)
 DEDUP_FIELDS = [
