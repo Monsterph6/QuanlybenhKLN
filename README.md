@@ -25,8 +25,9 @@ Mã nguồn gồm:
 ## Yêu cầu
 
 - Python 3.8 trở lên (máy này đang có Python 3.10).
-- Thư viện `PyQt6`, `PyQt6-Charts` (vẽ biểu đồ ở tab "Thống kê") và `openpyxl`
-  (đã có sẵn trên máy này). Nếu máy khác chưa có, chạy:
+- Thư viện `PyQt6`, `PyQt6-Charts` (vẽ biểu đồ ở tab "Thống kê"), `openpyxl`
+  (đọc/ghi `.xlsx`) và `xlrd` (đọc file `.xls` cũ định dạng Excel 97-2003) —
+  đã có sẵn trên máy này. Nếu máy khác chưa có, chạy:
   ```
   pip install -r requirements.txt
   ```
@@ -53,9 +54,26 @@ Administrator nếu máy đang ở vai trò Máy chủ), **Hướng dẫn sử d
 và **Giới thiệu** (xem phiên bản hiện tại).
 
 ### 1. Tab "Nhập dữ liệu"
-- Chọn file Excel (`.xlsx`) và bấm **Nhập vào cơ sở dữ liệu**.
-- Ứng dụng tự dò cột theo tiêu đề "Họ và tên" nên vẫn nhập đúng dù có vài dòng
-  tiêu đề gộp (merge) ở đầu file.
+- Chọn file Excel (`.xlsx` hoặc `.xls` cũ) và bấm **Nhập vào cơ sở dữ liệu** —
+  mở ra hộp thoại **"Ánh xạ cột khi nhập Excel"**:
+  - Ứng dụng tự đoán trước: sheet nào, dòng tiêu đề nào, và cột nào ứng với
+    trường nào (Họ và tên, Giới tính, Năm sinh, CCCD, Địa chỉ, Ngày khám, Chẩn
+    đoán...) — dựa theo **tên cột thực tế** trong file (nhận diện được nhiều
+    biến thể như "Tên bệnh nhân" thay vì "Họ và tên", "CCCD/ Hộ chiếu" thay vì
+    "Số CCCD"...), không còn giả định thứ tự cột cố định như trước.
+  - Bảng xem trước 5 dòng dữ liệu đầu giúp kiểm tra nhanh việc đoán có đúng
+    không — sai/thiếu ô nào thì sửa lại bằng dropdown tương ứng trước khi bấm
+    **"Nhập dữ liệu từ sheet này"**. Cột bắt buộc phải chọn: **Họ và tên**.
+  - Một số file có **Giới tính tách thành 2 cột con "Nam"/"Nữ"** (giá trị năm
+    sinh/tuổi nằm ở cột nào xác định giới tính đó) thay vì 1 cột "Giới tính"
+    dạng chữ — tích ô **"Giới tính & Năm sinh/Tuổi nằm trong 2 cột tách
+    riêng"** (tự bật sẵn nếu nhận diện được) rồi chọn đúng 2 cột.
+  - File có **nhiều sheet bố cục khác nhau** (thường gặp ở báo cáo BKLN thực
+    tế — mỗi mặt bệnh 1 sheet riêng, có khi kèm cả sheet tổng hợp số liệu
+    không phải danh sách bệnh nhân): đổi **Sheet** ở đầu hộp thoại và lặp lại
+    các bước trên cho từng sheet cần nhập — không bắt buộc nhập hết mọi sheet,
+    sheet nào không phải danh sách bệnh nhân thì bỏ qua. Bấm **"Đóng"** khi
+    nhập xong tất cả các sheet cần thiết.
 - Mỗi dòng dữ liệu được nhận diện trùng lặp tuyệt đối (giống hệt mọi trường)
   bằng mã băm — nên **nhập lại cùng một file nhiều lần sẽ không bị nhân đôi
   dữ liệu**. Việc này khác với "bệnh nhân trùng" (cùng một người có nhiều lượt

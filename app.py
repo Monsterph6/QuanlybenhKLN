@@ -28,7 +28,8 @@ import netclient
 import netserver
 from core import (
     BASE_DIR, DB_PATH, COLUMNS, DEDUP_FIELDS, PAGE_SIZE,
-    get_conn, init_db, record_count, import_excel,
+    get_conn, init_db, record_count,
+    MAPPING_FIELDS, list_sheet_names, detect_sheet_mapping, import_excel_mapped, at,
     write_export, export_query_to_file,
     count_swapped_gender_birthdate, fix_swapped_gender_birthdate,
     count_unparsed_kham_dates, fix_unparsed_kham_dates,
@@ -191,20 +192,221 @@ def make_table_view():
 # Tab Nhap du lieu
 # ------------------------------------------------------------------
 
-class ImportWorker(QtCore.QThread):
-    finished_ok = QtCore.pyqtSignal(int, int, int)
-    failed = QtCore.pyqtSignal(str)
+def _col_letter(n):
+    """Chi so cot 1-based -> ky hieu cot kieu Excel (1->A, 27->AA...)."""
+    s = ""
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
 
-    def __init__(self, path):
-        super().__init__()
+
+class ImportMappingDialog(QtWidgets.QDialog):
+    """Hop thoai anh xa cot khi nhap Excel: ung dung tu doan truoc (theo ten
+    cot, xem core.detect_sheet_mapping) - nguoi dung xem lai bang xem truoc,
+    sua o nao bi sai/con trong ("(Không dùng)") roi moi bam nhap. File co
+    nhieu sheet bo cuc khac nhau (thuong gap voi bao cao BKLN thuc te) thi
+    doi sheet trong cung hop thoai nay va lap lai cho tung sheet can nhap -
+    khong bat buoc phai nhap het moi sheet (vd bo qua sheet tong hop)."""
+
+    def __init__(self, parent, path):
+        super().__init__(parent)
+        self.setWindowTitle("Ánh xạ cột khi nhập Excel")
+        self.resize(900, 700)
         self.path = path
+        self.sheet_names = list_sheet_names(path)
+        self.current_sheet = None
+        self.header_row = 1
+        self.columns = {}
+        self.field_combos = {}
+        self.gender_male_combo = None
+        self.gender_female_combo = None
+        self.total_read = 0
+        self.total_inserted = 0
+        self.total_skipped = 0
+        self._loading = False
 
-    def run(self):
+        layout = QtWidgets.QVBoxLayout(self)
+
+        top_row = QtWidgets.QHBoxLayout()
+        top_row.addWidget(QtWidgets.QLabel("Sheet:"))
+        self.sheet_combo = QtWidgets.QComboBox()
+        self.sheet_combo.addItems(self.sheet_names)
+        self.sheet_combo.currentIndexChanged.connect(self.on_sheet_changed)
+        top_row.addWidget(self.sheet_combo, stretch=1)
+        top_row.addWidget(QtWidgets.QLabel("Dòng tiêu đề:"))
+        self.header_row_spin = QtWidgets.QSpinBox()
+        self.header_row_spin.setRange(1, 500)
+        self.header_row_spin.valueChanged.connect(self.on_header_row_changed)
+        top_row.addWidget(self.header_row_spin)
+        layout.addLayout(top_row)
+
+        note = QtWidgets.QLabel(
+            "Ứng dụng đã tự đoán dòng tiêu đề và cột tương ứng cho từng trường bên dưới - "
+            "kiểm tra bảng xem trước, sửa lại ô nào bị sai hoặc còn để \"(Không dùng)\" cho "
+            "đúng, rồi bấm \"Nhập dữ liệu từ sheet này\". Nếu file có nhiều sheet bố cục khác "
+            "nhau (ví dụ mỗi mặt bệnh 1 sheet riêng), đổi Sheet ở trên và lặp lại - sheet nào "
+            "không phải danh sách bệnh nhân (ví dụ sheet tổng hợp số liệu) thì bỏ qua không cần nhập.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        layout.addWidget(QtWidgets.QLabel("Xem trước (5 dòng dữ liệu đầu theo dòng tiêu đề hiện tại):"))
+        self.preview_table = QtWidgets.QTableWidget(0, 0)
+        self.preview_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.preview_table.setMaximumHeight(140)
+        layout.addWidget(self.preview_table)
+
+        self.gender_split_check = QtWidgets.QCheckBox(
+            "Giới tính & Năm sinh/Tuổi nằm trong 2 cột tách riêng (1 cột cho Nam, 1 cột cho Nữ)")
+        self.gender_split_check.toggled.connect(self.on_gender_split_toggled)
+        layout.addWidget(self.gender_split_check)
+
+        self.mapping_form = QtWidgets.QFormLayout()
+        mapping_widget = QtWidgets.QWidget()
+        mapping_widget.setLayout(self.mapping_form)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidget(mapping_widget)
+        scroll.setWidgetResizable(True)
+        layout.addWidget(scroll, stretch=1)
+
+        self.log = QtWidgets.QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setMaximumHeight(90)
+        layout.addWidget(self.log)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        import_btn = QtWidgets.QPushButton("Nhập dữ liệu từ sheet này")
+        import_btn.setObjectName("PrimaryButton")
+        import_btn.clicked.connect(self.import_current_sheet)
+        btn_row.addWidget(import_btn)
+        btn_row.addStretch(1)
+        close_btn = QtWidgets.QPushButton("Đóng")
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        self.load_sheet(self.sheet_names[0])
+
+    def on_sheet_changed(self, idx):
+        if idx < 0 or self._loading:
+            return
+        self.load_sheet(self.sheet_names[idx])
+
+    def load_sheet(self, sheet_name, header_row=None):
+        self._loading = True
         try:
-            total, inserted, skipped = import_excel(self.path)
-            self.finished_ok.emit(total, inserted, skipped)
+            info = detect_sheet_mapping(self.path, sheet_name, header_row=header_row)
         except Exception as e:
-            self.failed.emit(str(e))
+            QtWidgets.QMessageBox.critical(self, "Lỗi", f"Không đọc được sheet \"{sheet_name}\":\n{e}")
+            self._loading = False
+            return
+        self.current_sheet = sheet_name
+        self.header_row = info["header_row"]
+        self.columns = info["columns"]
+        self.header_row_spin.blockSignals(True)
+        self.header_row_spin.setValue(self.header_row)
+        self.header_row_spin.blockSignals(False)
+        self._rebuild_preview(info["preview_rows"])
+        self._apply_mapping(info["mapping"], info["gender_split_cols"])
+        self._loading = False
+
+    def on_header_row_changed(self, value):
+        if self._loading:
+            return
+        self.load_sheet(self.current_sheet, header_row=value)
+
+    def on_gender_split_toggled(self, _checked):
+        if self._loading:
+            return
+        self._rebuild_mapping_form()
+
+    def _rebuild_preview(self, preview_rows):
+        cols = sorted(self.columns.keys())
+        self.preview_table.clear()
+        self.preview_table.setColumnCount(len(cols))
+        self.preview_table.setHorizontalHeaderLabels(
+            [f"{_col_letter(c)}: {self.columns[c]}" for c in cols])
+        self.preview_table.setRowCount(len(preview_rows))
+        for r, row in enumerate(preview_rows):
+            for ci, c in enumerate(cols):
+                val = at(row, c)
+                self.preview_table.setItem(r, ci, QtWidgets.QTableWidgetItem("" if val is None else str(val)))
+
+    def _make_column_combo(self):
+        combo = QtWidgets.QComboBox()
+        combo.addItem("(Không dùng)", None)
+        for c in sorted(self.columns.keys()):
+            combo.addItem(f"Cột {_col_letter(c)}: {self.columns[c]}", c)
+        return combo
+
+    def _rebuild_mapping_form(self):
+        while self.mapping_form.rowCount() > 0:
+            self.mapping_form.removeRow(0)
+        self.field_combos = {}
+        self.gender_male_combo = None
+        self.gender_female_combo = None
+
+        split_on = self.gender_split_check.isChecked()
+        for field, label, required in MAPPING_FIELDS:
+            if split_on and field in ("gioi_tinh", "nam_sinh_raw"):
+                continue
+            combo = self._make_column_combo()
+            self.field_combos[field] = combo
+            self.mapping_form.addRow(label + (" *" if required else ""), combo)
+        if split_on:
+            self.gender_male_combo = self._make_column_combo()
+            self.gender_female_combo = self._make_column_combo()
+            self.mapping_form.addRow("Cột Nam (năm sinh/tuổi)", self.gender_male_combo)
+            self.mapping_form.addRow("Cột Nữ (năm sinh/tuổi)", self.gender_female_combo)
+
+    def _apply_mapping(self, mapping, gender_split_cols):
+        self.gender_split_check.blockSignals(True)
+        self.gender_split_check.setChecked(bool(gender_split_cols))
+        self.gender_split_check.blockSignals(False)
+        self._rebuild_mapping_form()
+        for field, combo in self.field_combos.items():
+            idx = combo.findData(mapping.get(field))
+            combo.setCurrentIndex(idx if idx >= 0 else 0)
+        if gender_split_cols:
+            male_col, female_col = gender_split_cols
+            self.gender_male_combo.setCurrentIndex(max(self.gender_male_combo.findData(male_col), 0))
+            self.gender_female_combo.setCurrentIndex(max(self.gender_female_combo.findData(female_col), 0))
+
+    def import_current_sheet(self):
+        mapping = {field: combo.currentData() for field, combo in self.field_combos.items()}
+        gender_split_cols = None
+        if self.gender_split_check.isChecked():
+            male_col = self.gender_male_combo.currentData()
+            female_col = self.gender_female_combo.currentData()
+            if not male_col or not female_col:
+                QtWidgets.QMessageBox.warning(
+                    self, "Thiếu cột",
+                    "Đã bật tách Giới tính theo 2 cột Nam/Nữ - cần chọn cả 2 cột.")
+                return
+            gender_split_cols = (male_col, female_col)
+
+        if not mapping.get("ho_ten"):
+            QtWidgets.QMessageBox.warning(
+                self, "Thiếu cột bắt buộc",
+                "Cần chọn cột cho trường \"Họ và tên\" trước khi nhập.")
+            return
+
+        self.setCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            total, inserted, skipped = import_excel_mapped(
+                self.path, self.current_sheet, self.header_row, mapping, gender_split_cols)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Lỗi khi nhập dữ liệu", str(e))
+            return
+        finally:
+            self.unsetCursor()
+
+        self.total_read += total
+        self.total_inserted += inserted
+        self.total_skipped += skipped
+        self.log.appendPlainText(
+            f"Sheet \"{self.current_sheet}\": đọc {total:,} dòng, thêm mới {inserted:,}, "
+            f"bỏ qua (trùng) {skipped:,}.")
 
 
 class LoginDialog(QtWidgets.QDialog):
@@ -351,7 +553,6 @@ class ImportTab(QtWidgets.QWidget):
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
-        self.worker = None
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(12)
@@ -373,11 +574,6 @@ class ImportTab(QtWidgets.QWidget):
         self.import_btn.setObjectName("PrimaryButton")
         self.import_btn.clicked.connect(self.start_import)
         layout.addWidget(self.import_btn, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
-
-        self.progress = QtWidgets.QProgressBar()
-        self.progress.setVisible(False)
-        self.progress.setRange(0, 0)
-        layout.addWidget(self.progress)
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -439,7 +635,7 @@ class ImportTab(QtWidgets.QWidget):
 
     def _find_default_xlsx(self):
         for f in os.listdir(BASE_DIR):
-            if f.lower().endswith(".xlsx") and not f.startswith("~$"):
+            if f.lower().endswith((".xlsx", ".xls")) and not f.startswith("~$"):
                 return os.path.join(BASE_DIR, f)
         return None
 
@@ -457,18 +653,17 @@ class ImportTab(QtWidgets.QWidget):
         if not path or not os.path.isfile(path):
             QtWidgets.QMessageBox.critical(self, "Lỗi", "Vui lòng chọn một file Excel hợp lệ.")
             return
-        self.import_btn.setEnabled(False)
-        self.progress.setVisible(True)
-        self.log_line(f"Đang đọc file: {path}")
-
-        self.worker = ImportWorker(path)
-        self.worker.finished_ok.connect(self.import_done)
-        self.worker.failed.connect(self.import_failed)
-        self.worker.start()
+        try:
+            dialog = ImportMappingDialog(self, path)
+        except Exception as e:
+            self.log_line(f"LỖI: {e}")
+            QtWidgets.QMessageBox.critical(self, "Lỗi khi đọc file Excel", str(e))
+            return
+        dialog.exec()
+        if dialog.total_read:
+            self.import_done(dialog.total_read, dialog.total_inserted, dialog.total_skipped)
 
     def import_done(self, total, inserted, skipped):
-        self.progress.setVisible(False)
-        self.import_btn.setEnabled(True)
         self.log_line(f"Đã đọc: {total:,} dòng")
         self.log_line(f"Thêm mới vào CSDL: {inserted:,} bản ghi")
         self.log_line(f"Bỏ qua (dòng dữ liệu giống hệt đã có, tránh nhập trùng khi nhập lại file): {skipped:,}")
@@ -486,12 +681,6 @@ class ImportTab(QtWidgets.QWidget):
             self.log_line("Không phát hiện vấn đề chất lượng dữ liệu nào.")
         self.log_line("-" * 60)
         self.main_window.on_data_changed()
-
-    def import_failed(self, msg):
-        self.progress.setVisible(False)
-        self.import_btn.setEnabled(True)
-        self.log_line(f"LỖI: {msg}")
-        QtWidgets.QMessageBox.critical(self, "Lỗi khi nhập dữ liệu", msg)
 
     def reset_db(self):
         reply = QtWidgets.QMessageBox.question(

@@ -1,6 +1,7 @@
 PyQt6
 PyQt6-Charts
 openpyxl
+xlrd
 pywin32
 pystray
 Pillow

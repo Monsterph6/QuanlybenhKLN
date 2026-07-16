@@ -21,6 +21,11 @@ try:
 except ImportError:
     openpyxl = None
 
+try:
+    import xlrd
+except ImportError:
+    xlrd = None
+
 if getattr(sys, "frozen", False):
     # Khi da dong goi bang PyInstaller, __file__ tro vao trong thu muc _internal
     # (bi xoa/thay the moi lan cap nhat) - phai dung thu muc chua file .exe thuc
@@ -340,6 +345,10 @@ def normalize_date_value(value):
         return value.strftime("%d/%m/%Y %H:%M")
     if isinstance(value, datetime.date):
         return value.strftime("%d/%m/%Y")
+    if isinstance(value, float) and value.is_integer():
+        # File .xls (xlrd) tra ve so nguyen dang float (vd nam sinh 1989.0)
+        # - bo ".0" cho gon, giong hanh vi openpyxl (tra ve int that su).
+        return str(int(value))
     return str(value).strip()
 
 
@@ -369,15 +378,6 @@ def parse_kham_date_iso(raw):
         return None
 
 
-def find_header(ws):
-    for r, row in enumerate(ws.iter_rows(min_row=1, max_row=10, values_only=True), start=1):
-        for c, val in enumerate(row, start=1):
-            if val and str(val).strip() in ("Họ và tên", "Họ tên"):
-                return r, c
-    raise ValueError("Không tìm thấy cột 'Họ và tên' trong 10 dòng đầu của file Excel. "
-                      "Vui lòng kiểm tra định dạng file.")
-
-
 def at(row, col):
     """row: tuple gia tri 1 dong (0-based); col: chi so cot 1-based hoac None."""
     if col is None or col < 1 or col > len(row):
@@ -385,71 +385,297 @@ def at(row, col):
     return row[col - 1]
 
 
-def read_excel_rows(path):
-    """Sinh ra tung dict du lieu tho cho moi dong benh nhan trong file Excel.
-    Doc tuan tu bang iter_rows vi truy cap ngau nhien ws.cell() trong che do
-    read_only cua openpyxl rat cham voi file lon (~16.000 dong)."""
-    if openpyxl is None:
-        raise RuntimeError("Chưa cài thư viện openpyxl. Chạy: pip install openpyxl")
-    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb[wb.sheetnames[0]]
-    header_row, col_hoten = find_header(ws)
+# ------------------------------------------------------------------
+# Nhap Excel co anh xa cot (mapping): file bao cao BKLN thuc te khong dung
+# chung 1 mau co dinh - ten cot khac nhau ("Họ và tên" vs "Tên bệnh nhân"),
+# thu tu cot khac nhau, co file tach Gioi tinh/Nam sinh thanh 2 cot con
+# "Nam"/"Nữ" thay vi 1 cot text, co file nhieu sheet voi bo cuc khac nhau
+# trong cung workbook. Thay vi doan mot mau co dinh (rui ro doc sai neu bo
+# cuc khac), ung dung tu doan truoc (theo ten cot, khong theo vi tri) roi
+# nguoi dung xac nhan/sua lai qua hop thoai truoc khi thuc su nhap - xem
+# ImportMappingDialog trong app.py.
+# ------------------------------------------------------------------
 
-    col_tt = col_hoten - 1
-    col_gioitinh = col_hoten + 1
-    col_ngaysinh = col_hoten + 2
-    col_bhyt = col_hoten + 3
-    col_cccd = col_hoten + 4
-    col_diachi = col_hoten + 5
-    col_phuongxa = col_hoten + 6
-    col_tinhtp = col_hoten + 7
-    col_ngaykham = col_hoten + 8
-    col_chandoan = col_hoten + 9
-    col_benhkem = col_hoten + 10
+MAPPING_FIELDS = [
+    ("tt", "STT", False),
+    ("ho_ten", "Họ và tên", True),
+    ("gioi_tinh", "Giới tính", False),
+    ("nam_sinh_raw", "Năm sinh", False),
+    ("ma_bhyt", "Số BHYT", False),
+    ("so_cccd", "Số CCCD", False),
+    ("dia_chi", "Địa chỉ", False),
+    ("phuong_xa", "Phường/Xã", False),
+    ("tinh_tp", "Tỉnh/TP", False),
+    ("ngay_kham_raw", "Ngày khám", False),
+    ("chan_doan", "Chẩn đoán", False),
+    ("benh_kem_theo", "Bệnh kèm theo", False),
+]
 
-    data_start = header_row + 1
-    row_iter = ws.iter_rows(min_row=data_start, values_only=True)
-    first_row = next(row_iter, None)
-    if first_row is not None:
-        probe = at(first_row, col_tt)
-        if not isinstance(probe, (int, float)):
-            first_row = next(row_iter, None)
+# Cac bien the ten cot thuong gap trong thuc te - dung de tu doan anh xa.
+# Khop kieu "chua chuoi con" (vd "CHẨN ĐOÁN\n(ICD)" van khop alias "chẩn
+# đoán"), uu tien alias dai/cu the hon khi 1 cot co the khop nhieu truong.
+FIELD_ALIASES = {
+    "tt": ["stt", "số tt", "số thứ tự"],
+    "ho_ten": ["họ và tên", "họ tên", "tên bệnh nhân"],
+    "gioi_tinh": ["giới tính"],
+    "nam_sinh_raw": ["năm sinh", "ngày sinh", "tuổi"],
+    "ma_bhyt": ["mã thẻ bhyt", "mã bhyt", "số bhyt", "bhyt"],
+    "so_cccd": ["cccd/ hộ chiếu", "cccd/hộ chiếu", "căn cước công dân",
+                "số căn cước", "số cccd", "cccd", "cmnd"],
+    "dia_chi": ["địa chỉ hành chính", "địa chỉ bảo hiểm", "địa chỉ"],
+    "phuong_xa": ["phường/xã", "phường xã", "xã/phường", "xã (p)", "phường (xã)"],
+    "tinh_tp": ["tỉnh/thành phố", "tỉnh thành phố", "tỉnh/tp", "tỉnh tp", "tỉnh (tp)"],
+    "ngay_kham_raw": ["ngày khám bệnh", "ngày khám", "thời gian tiếp nhận"],
+    "benh_kem_theo": ["tên bệnh kèm theo", "bệnh kèm theo", "bệnh kèm thèm", "tên bệnh phụ"],
+    "chan_doan": ["mã bệnh chính", "chẩn đoán", "tên bệnh"],
+}
 
-    def rows():
-        if first_row is not None:
-            yield first_row
-        for r in row_iter:
-            yield r
 
-    for row in rows():
-        ho_ten = at(row, col_hoten)
-        so_cccd = at(row, col_cccd)
-        if not ho_ten and not so_cccd:
+def _norm_header(text):
+    return re.sub(r"\s+", " ", str(text or "").strip().lower())
+
+
+class _OpenpyxlReader:
+    """Doc file .xlsx/.xlsm. read_only=True de doc nhanh file lon (~16.000
+    dong), chi truy cap tuan tu bang iter_rows."""
+
+    def __init__(self, path):
+        if openpyxl is None:
+            raise RuntimeError("Chưa cài thư viện openpyxl. Chạy: pip install openpyxl")
+        self._wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+
+    @property
+    def sheet_names(self):
+        return list(self._wb.sheetnames)
+
+    def iter_rows(self, sheet_name, min_row, max_row=None):
+        ws = self._wb[sheet_name]
+        yield from ws.iter_rows(min_row=min_row, max_row=max_row, values_only=True)
+
+    def close(self):
+        self._wb.close()
+
+
+class _XlrdReader:
+    """Doc file .xls cu (dinh dang nhi phan Excel 97-2003) qua xlrd - openpyxl
+    khong doc duoc dinh dang nay. Tu chuyen cac o kieu ngay/gio (XL_CELL_DATE)
+    sang datetime.datetime giong het openpyxl, de phan con lai cua core.py
+    (normalize_date_value...) khong can biet file goc la dinh dang nao."""
+
+    def __init__(self, path):
+        if xlrd is None:
+            raise RuntimeError(
+                "Chưa cài thư viện xlrd (cần để đọc file .xls cũ định dạng Excel "
+                "97-2003). Chạy: pip install xlrd — hoặc mở file bằng Excel rồi "
+                "lưu lại dưới dạng .xlsx trước khi nhập.")
+        self._wb = xlrd.open_workbook(path)
+
+    @property
+    def sheet_names(self):
+        return list(self._wb.sheet_names())
+
+    def iter_rows(self, sheet_name, min_row, max_row=None):
+        ws = self._wb.sheet_by_name(sheet_name)
+        end = ws.nrows if max_row is None else min(max_row, ws.nrows)
+        datemode = self._wb.datemode
+        for r in range(min_row - 1, end):
+            values = []
+            for cell in ws.row(r):
+                if cell.ctype == xlrd.XL_CELL_DATE:
+                    try:
+                        values.append(xlrd.xldate.xldate_as_datetime(cell.value, datemode))
+                    except (xlrd.xldate.XLDateError, ValueError):
+                        values.append(cell.value)
+                elif cell.ctype == xlrd.XL_CELL_EMPTY:
+                    values.append(None)
+                else:
+                    values.append(cell.value)
+            yield tuple(values)
+
+    def close(self):
+        pass
+
+
+def _open_reader(path):
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".xls":
+        return _XlrdReader(path)
+    return _OpenpyxlReader(path)
+
+
+def list_sheet_names(path):
+    reader = _open_reader(path)
+    try:
+        return reader.sheet_names
+    finally:
+        reader.close()
+
+
+def _match_columns_to_fields(columns):
+    """columns: {chi_so_cot: text}. Tra ve {field: chi_so_cot} - chi nhung
+    field khop duoc; neu 2 field cung khop 1 cot (vd "Tên bệnh nhân" chua ca
+    alias cua ho_ten lan alias "tên bệnh" cua chan_doan) thi alias dai/cu
+    the hon thang, khong phu thuoc thu tu cot trong file."""
+    candidates = []
+    for col, text in columns.items():
+        norm = _norm_header(text)
+        if not norm:
             continue
-        nam_sinh_raw = normalize_date_value(at(row, col_ngaysinh))
-        gioi_tinh = (str(at(row, col_gioitinh) or "").strip())
-        # Mot so dong trong file nguon bi dao nham cot Gioi tinh <-> Ngay sinh
-        # (vi du gioi_tinh='1958', nam_sinh_raw='Nam'). Phat hien va hoan lai.
-        if gioi_tinh not in ("Nam", "Nữ") and nam_sinh_raw in ("Nam", "Nữ"):
-            gioi_tinh, nam_sinh_raw = nam_sinh_raw, gioi_tinh
-        ngay_kham_raw = normalize_date_value(at(row, col_ngaykham))
-        yield {
-            "tt": at(row, col_tt),
-            "ho_ten": (str(ho_ten).strip() if ho_ten else ""),
-            "gioi_tinh": gioi_tinh,
-            "nam_sinh_raw": nam_sinh_raw,
-            "birth_year": extract_birth_year(nam_sinh_raw),
-            "ma_bhyt": (str(at(row, col_bhyt) or "").strip()),
-            "so_cccd": (str(so_cccd or "").strip()),
-            "dia_chi": (str(at(row, col_diachi) or "").strip()),
-            "phuong_xa": (str(at(row, col_phuongxa) or "").strip()),
-            "tinh_tp": (str(at(row, col_tinhtp) or "").strip()),
-            "ngay_kham_raw": ngay_kham_raw,
-            "ngay_kham_date": parse_kham_date_iso(ngay_kham_raw),
-            "chan_doan": (str(at(row, col_chandoan) or "").strip()),
-            "benh_kem_theo": (str(at(row, col_benhkem) or "").strip()),
-        }
-    wb.close()
+        for field, aliases in FIELD_ALIASES.items():
+            for alias in aliases:
+                if alias in norm:
+                    candidates.append((len(alias), field, col))
+    candidates.sort(key=lambda t: -t[0])
+    result = {}
+    used_cols = set()
+    for _, field, col in candidates:
+        if field in result or col in used_cols:
+            continue
+        result[field] = col
+        used_cols.add(col)
+    return result
+
+
+def detect_header_row(reader, sheet_name, max_scan_rows=15):
+    """Do tim dong tieu de: chon dong co nhieu o khop voi ten cac truong da
+    biet nhat, trong so cac dong dau. Neu khong dong nao khop duoc gi thi
+    mac dinh dong 1 - nguoi dung tu sua lai trong hop thoai anh xa cot."""
+    best_row, best_score = 1, -1
+    for r, row in enumerate(reader.iter_rows(sheet_name, min_row=1, max_row=max_scan_rows), start=1):
+        columns = {c: v for c, v in enumerate(row, start=1) if v and str(v).strip()}
+        score = len(_match_columns_to_fields(columns))
+        if score > best_score:
+            best_row, best_score = r, score
+    return best_row
+
+
+def auto_map_columns(columns):
+    matched = _match_columns_to_fields(columns)
+    return {field: matched.get(field) for field, _, _ in MAPPING_FIELDS}
+
+
+def detect_gender_split(reader, sheet_name, header_row, mapping):
+    """Mot so mau bao cao tach Gioi tinh + Nam sinh/Tuoi thanh 2 cot con
+    "Nam"/"Nữ" ngay duoi dong tieu de (gia tri nam o cot nao xac dinh gioi
+    tinh, xem README). Chi goi ham nay khi CHUA tu khop duoc cot "Giới
+    tính" rieng - tra ve (cot_nam, cot_nu) hoac (None, None)."""
+    if mapping.get("gioi_tinh"):
+        return None, None
+    sub_row = next(reader.iter_rows(sheet_name, min_row=header_row + 1, max_row=header_row + 1), None)
+    if not sub_row:
+        return None, None
+    male_col = female_col = None
+    for c, val in enumerate(sub_row, start=1):
+        norm = _norm_header(val)
+        if norm == "nam":
+            male_col = c
+        elif norm in ("nữ", "nu"):
+            female_col = c
+    if male_col and female_col:
+        return male_col, female_col
+    return None, None
+
+
+def detect_sheet_mapping(path, sheet_name, header_row=None):
+    """Doan toan bo thong tin can de nhap 1 sheet: dong tieu de, danh sach
+    cot, anh xa tu dong theo ten cot, co tach Gioi tinh theo Nam/Nữ khong,
+    va vai dong du lieu dau de xem truoc. Goi lai voi header_row cu the khi
+    nguoi dung tu sua lai dong tieu de trong hop thoai."""
+    reader = _open_reader(path)
+    try:
+        if header_row is None:
+            header_row = detect_header_row(reader, sheet_name)
+        header_cells = next(reader.iter_rows(sheet_name, min_row=header_row, max_row=header_row), ())
+        columns = {c: str(v).strip() for c, v in enumerate(header_cells, start=1) if v and str(v).strip()}
+        mapping = auto_map_columns(columns)
+        male_col, female_col = detect_gender_split(reader, sheet_name, header_row, mapping)
+        gender_split_cols = (male_col, female_col) if male_col and female_col else None
+        preview_start = header_row + (2 if gender_split_cols else 1)
+        preview_rows = []
+        for i, row in enumerate(reader.iter_rows(sheet_name, min_row=preview_start)):
+            if i >= 5:
+                break
+            preview_rows.append(row)
+    finally:
+        reader.close()
+    return {
+        "header_row": header_row,
+        "columns": columns,
+        "mapping": mapping,
+        "gender_split_cols": gender_split_cols,
+        "preview_rows": preview_rows,
+    }
+
+
+def read_excel_rows_mapped(path, sheet_name, header_row, mapping, gender_split_cols=None):
+    """Sinh ra tung dict du lieu tho cho moi dong benh nhan, theo dung anh
+    xa cot (mapping) da duoc xac nhan qua hop thoai - khong con doan vi tri
+    cot theo offset co dinh nhu truoc."""
+    reader = _open_reader(path)
+
+    col_tt = mapping.get("tt")
+    col_hoten = mapping.get("ho_ten")
+    col_gioitinh = mapping.get("gioi_tinh")
+    col_ngaysinh = mapping.get("nam_sinh_raw")
+    col_bhyt = mapping.get("ma_bhyt")
+    col_cccd = mapping.get("so_cccd")
+    col_diachi = mapping.get("dia_chi")
+    col_phuongxa = mapping.get("phuong_xa")
+    col_tinhtp = mapping.get("tinh_tp")
+    col_ngaykham = mapping.get("ngay_kham_raw")
+    col_chandoan = mapping.get("chan_doan")
+    col_benhkem = mapping.get("benh_kem_theo")
+    male_col, female_col = gender_split_cols or (None, None)
+
+    # Neu co dong phu Nam/Nữ ngay duoi dong tieu de (xem detect_gender_split),
+    # bo qua dong do khi doc du lieu that su.
+    data_start = header_row + (2 if (male_col and female_col) else 1)
+    auto_tt = 0
+    try:
+        for row in reader.iter_rows(sheet_name, min_row=data_start):
+            ho_ten = at(row, col_hoten)
+            so_cccd = at(row, col_cccd)
+            if not ho_ten and not so_cccd:
+                continue
+            auto_tt += 1
+
+            if male_col and female_col:
+                male_val = at(row, male_col)
+                female_val = at(row, female_col)
+                if male_val not in (None, ""):
+                    gioi_tinh, nam_sinh_raw = "Nam", normalize_date_value(male_val)
+                elif female_val not in (None, ""):
+                    gioi_tinh, nam_sinh_raw = "Nữ", normalize_date_value(female_val)
+                else:
+                    gioi_tinh, nam_sinh_raw = "", ""
+            else:
+                gioi_tinh = str(at(row, col_gioitinh) or "").strip()
+                nam_sinh_raw = normalize_date_value(at(row, col_ngaysinh))
+                # Mot so dong trong file nguon bi dao nham cot Gioi tinh <-> Nam
+                # sinh (vi du gioi_tinh='1958', nam_sinh_raw='Nam'). Phat hien
+                # va hoan lai.
+                if gioi_tinh not in ("Nam", "Nữ") and nam_sinh_raw in ("Nam", "Nữ"):
+                    gioi_tinh, nam_sinh_raw = nam_sinh_raw, gioi_tinh
+
+            ngay_kham_raw = normalize_date_value(at(row, col_ngaykham))
+            yield {
+                "tt": at(row, col_tt) if col_tt else auto_tt,
+                "ho_ten": (str(ho_ten).strip() if ho_ten else ""),
+                "gioi_tinh": gioi_tinh,
+                "nam_sinh_raw": nam_sinh_raw,
+                "birth_year": extract_birth_year(nam_sinh_raw),
+                "ma_bhyt": (str(at(row, col_bhyt) or "").strip()),
+                "so_cccd": (str(so_cccd or "").strip()),
+                "dia_chi": (str(at(row, col_diachi) or "").strip()),
+                "phuong_xa": (str(at(row, col_phuongxa) or "").strip()),
+                "tinh_tp": (str(at(row, col_tinhtp) or "").strip()),
+                "ngay_kham_raw": ngay_kham_raw,
+                "ngay_kham_date": parse_kham_date_iso(ngay_kham_raw),
+                "chan_doan": (str(at(row, col_chandoan) or "").strip()),
+                "benh_kem_theo": (str(at(row, col_benhkem) or "").strip()),
+            }
+    finally:
+        reader.close()
 
 
 def row_hash(r):
@@ -469,10 +695,11 @@ def row_hash(r):
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def import_excel(path, progress_cb=None):
-    """Doc file Excel va nhap vao SQLite. Tra ve (tong_doc, them_moi, bo_qua_trung).
-    Ghi theo lo (executemany moi 500 dong) de giam so lan goi mang khi dang
-    o che do may tram (moi lan goi la 1 request qua mang toi may chu)."""
+def import_excel_mapped(path, sheet_name, header_row, mapping, gender_split_cols=None, progress_cb=None):
+    """Doc 1 sheet cua file Excel theo dung anh xa cot (mapping) da xac
+    nhan va nhap vao SQLite. Tra ve (tong_doc, them_moi, bo_qua_trung). Ghi
+    theo lo (executemany moi 500 dong) de giam so lan goi mang khi dang o
+    che do may tram (moi lan goi la 1 request qua mang toi may chu)."""
     conn = get_conn()
     cur = conn.cursor()
     total = 0
@@ -497,7 +724,7 @@ def import_excel(path, progress_cb=None):
             inserted += cur.rowcount
         batch.clear()
 
-    for r in read_excel_rows(path):
+    for r in read_excel_rows_mapped(path, sheet_name, header_row, mapping, gender_split_cols):
         total += 1
         h = row_hash(r)
         batch.append((
