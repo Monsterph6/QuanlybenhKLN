@@ -64,6 +64,9 @@ hoàn toàn offline, không gửi dữ liệu ra ngoài.
 - Nút **Sửa lỗi định dạng Ngày khám bị bỏ sót** dùng khi Ngày khám ghi theo kiểu
   "HH:MM dd/mm/yyyy" (giờ trước ngày) khiến ứng dụng không đọc được — bấm để
   tính lại cho các dòng này.
+- Nút **Xác định lại Nhóm bệnh (KLN)** dùng cho dữ liệu đã nhập từ trước khi có
+  tính năng phân loại Nhóm bệnh (xem mục "Phân loại Nhóm bệnh không lây nhiễm"
+  bên dưới) — chỉ gán cho các dòng đang trống, không ghi đè dòng đã có/đã sửa tay.
 - Nút **Sao lưu CSDL ngay** / **Mở thư mục sao lưu**: tạo bản sao `benh_nhan.db`
   kèm timestamp trong thư mục `backups/` (tự giữ lại 10 bản gần nhất). Các thao
   tác nguy hiểm (xóa toàn bộ, gộp/xóa bản ghi trùng, sửa lỗi dữ liệu) đều **tự
@@ -77,7 +80,9 @@ hoàn toàn offline, không gửi dữ liệu ra ngoài.
 
 ### 2. Tab "Danh sách"
 - Xem toàn bộ dữ liệu đã nhập, có phân trang (200 dòng/trang).
-- Tìm theo họ tên / số CCCD / mã BHYT, lọc theo giới tính.
+- Tìm theo họ tên / số CCCD / mã BHYT, lọc theo giới tính, lọc theo Nhóm bệnh
+  (KLN) — 1 bệnh nhân mắc nhiều bệnh cùng lúc (vd vừa THA vừa ĐTĐ) vẫn hiện ra
+  khi lọc theo từng bệnh riêng lẻ.
 - Xuất Excel (.xlsx) hoặc CSV theo đúng bộ lọc đang áp dụng — chọn định dạng
   ngay trong hộp thoại lưu file.
 
@@ -122,7 +127,7 @@ Việc gộp/xóa hàng loạt đều tự động sao lưu CSDL trước khi th
 
 **Trình tạo câu lệnh SQL (không cần biết cú pháp):** bấm vào ô có dấu tích ở
 đầu để mở rộng. Chọn các cột muốn hiển thị, thêm điều kiện lọc (chọn trường —
-toán tử như "bằng", "chứa", "lớn hơn", "để trống"... — nhập giá trị), tùy chọn
+toan tử như "bằng", "chứa", "lớn hơn", "để trống"... — nhập giá trị), tùy chọn
 nhóm theo 1 cột (tự thêm đếm số lượng), sắp xếp và giới hạn số dòng, rồi bấm
 **Tạo câu lệnh SQL** — câu lệnh sinh ra sẽ tự động điền vào khung soạn thảo bên
 dưới và chạy luôn, có thể chỉnh sửa lại nếu cần trước khi chạy lại.
@@ -131,7 +136,7 @@ dưới và chạy luôn, có thể chỉnh sửa lại nếu cần trước khi
   `SELECT`, tên bảng dữ liệu là `patients`).
 - Có sẵn danh sách "Câu lệnh nhanh": tổng số bản ghi, số bệnh nhân duy nhất
   theo CCCD, thống kê theo giới tính / tỉnh-thành / phường-xã, top chẩn đoán
-  phổ biến, thống kê theo năm sinh...
+  phổ biến, thống kê theo năm sinh, tổ hợp Nhóm bệnh (KLN)...
 - Có thể gõ câu lệnh SQL tùy ý, ví dụ:
   ```sql
   SELECT tinh_tp, gioi_tinh, COUNT(*) AS so_luong
@@ -147,6 +152,10 @@ dưới và chạy luôn, có thể chỉnh sửa lại nếu cần trước khi
 Vẽ biểu đồ trực quan (dùng PyQt6-Charts) trên dữ liệu hiện có trong CSDL, chọn
 qua ô "Loại thống kê":
 - **Giới tính** — biểu đồ tròn.
+- **Nhóm bệnh (KLN)** — biểu đồ cột, đếm theo TỪNG nhóm bệnh riêng lẻ (Tăng
+  huyết áp, Đái tháo đường, COPD/Hen phế quản, Ung thư, Khác) — 1 bệnh nhân
+  mắc nhiều bệnh cùng lúc được tính vào tất cả các nhóm liên quan, không chỉ
+  1 nhóm duy nhất. Xem mục "Phân loại Nhóm bệnh không lây nhiễm" bên dưới.
 - **Tỉnh/Thành phố**, **Phường/Xã** (top 20), **Chẩn đoán** (top 15) — biểu đồ
   cột ngang, xếp hạng theo số lượng giảm dần.
 - **Năm sinh theo thập kỷ** — biểu đồ cột theo từng thập kỷ (1960s, 1970s...).
@@ -161,6 +170,32 @@ Biểu đồ tự cập nhật khi mở lại tab này sau khi dữ liệu thay 
 > thức đáng tin cậy để đưa vào ứng dụng (chỉ có dữ liệu tham khảo chưa xác
 > thực từ cộng đồng). Nếu có file GeoJSON/KML ranh giới chính thức (ví dụ từ
 > Cổng thông tin điện tử TP Hải Phòng), có thể bổ sung bản đồ thật sau.
+
+### Phân loại Nhóm bệnh không lây nhiễm (KLN)
+
+Ứng dụng ban đầu chỉ quản lý riêng bệnh nhân Tăng huyết áp (THA), nay mở rộng
+để quản lý chung nhóm **Bệnh không lây nhiễm (KLN/NCD)**. Cột **Chẩn đoán**
+vẫn là nội dung gốc tự do từ file Excel; cột **Nhóm bệnh (KLN)** mới được suy
+ra từ đó, dùng để lọc/thống kê theo từng loại bệnh.
+
+- Khi nhập Excel, mỗi dòng được tự động dò từ khóa trong Chẩn đoán để gán vào
+  1 hoặc nhiều nhóm: **Tăng huyết áp**, **Đái tháo đường**, **COPD / Hen phế
+  quản**, **Ung thư** — hoặc **Khác** nếu Chẩn đoán có nội dung nhưng không
+  khớp nhóm nào. 1 bệnh nhân có thể thuộc nhiều nhóm cùng lúc (vd "Tăng huyết
+  áp, Đái tháo đường") — thực tế nhiều người mắc đồng thời nhiều bệnh không
+  lây nhiễm.
+- **Đây chỉ là dò từ khóa đơn giản, KHÔNG phải chẩn đoán y khoa chính thức** —
+  cần xem lại và có thể sửa tay trực tiếp cột "Nhóm bệnh (KLN)" ở tab "Danh
+  sách" (qua tab "Truy vấn SQL" chạy `UPDATE` hoặc mở rộng tính năng sửa trực
+  tiếp trong bảng sau này) nếu cần độ chính xác cao, ví dụ để báo cáo lên
+  tuyến trên.
+- Dữ liệu đã nhập từ trước khi có tính năng này (cột Nhóm bệnh còn trống)
+  dùng nút **Xác định lại Nhóm bệnh (KLN)** ở tab "Nhập dữ liệu" để gán bù,
+  không ghi đè các dòng đã có/đã sửa tay.
+- Danh mục nhóm bệnh hiện quản lý được định nghĩa trong `core.py` (biến
+  `DISEASE_CATEGORIES`) — muốn thêm nhóm bệnh mới (ví dụ Tâm thần, Bệnh thận
+  mạn...) thì sửa trực tiếp danh sách này (mã, nhãn hiển thị, danh sách từ
+  khóa không dấu) rồi chạy lại "Xác định lại Nhóm bệnh (KLN)".
 
 ### 6. Tab "Mạng LAN"
 
@@ -321,7 +356,8 @@ D bên dưới nếu sau này repo bị chuyển lại về Private.
 | tinh_tp | Tỉnh/Thành phố |
 | ngay_kham_raw | Ngày khám (giữ nguyên định dạng gốc) |
 | ngay_kham_date | Ngày khám chuẩn hóa dạng YYYY-MM-DD để sắp xếp/so sánh |
-| chan_doan | Chẩn đoán |
+| chan_doan | Chẩn đoán (nội dung gốc, tự do) |
+| benh | Nhóm bệnh không lây nhiễm (KLN) — suy ra từ Chẩn đoán bằng từ khóa, có thể nhiều nhóm cách nhau bởi ", " (vd "Tăng huyết áp, Đái tháo đường") |
 | benh_kem_theo | Bệnh kèm theo |
 | nguon_file | Tên file Excel đã nhập dòng này |
 | imported_at | Thời điểm nhập vào CSDL |
