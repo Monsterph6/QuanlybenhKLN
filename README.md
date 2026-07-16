@@ -83,13 +83,8 @@ hoàn toàn offline, không gửi dữ liệu ra ngoài.
 - Tìm theo họ tên / số CCCD / mã BHYT, lọc theo giới tính, lọc theo Nhóm bệnh
   (KLN) — 1 bệnh nhân mắc nhiều bệnh cùng lúc (vd vừa THA vừa ĐTĐ) vẫn hiện ra
   khi lọc theo từng bệnh riêng lẻ.
-- Ngoài cột "Nhóm bệnh (KLN)" gộp (vd "Tăng huyết áp, Đái tháo đường"), bảng
-  còn hiện thêm 1 cột riêng cho TỪNG nhóm bệnh (Tăng huyết áp, Đái tháo đường,
-  COPD/Hen phế quản, Ung thư, Tâm thần, Khác) — đánh dấu "X" nếu bệnh nhân
-  thuộc nhóm đó, để dễ đọc/lọc theo từng bệnh hơn là phải đọc chuỗi gộp.
 - Xuất Excel (.xlsx) hoặc CSV theo đúng bộ lọc đang áp dụng — chọn định dạng
-  ngay trong hộp thoại lưu file. File xuất cũng có đủ các cột đánh dấu riêng
-  từng nhóm bệnh như trên bảng.
+  ngay trong hộp thoại lưu file.
 
 ### 3. Tab "Lọc trùng"
 - **Tiêu chí xác định trùng**: tích chọn 1 hoặc nhiều trường trong số Số CCCD,
@@ -123,9 +118,7 @@ khỏi các lần quét sau (theo đúng tổ hợp tiêu chí đang chọn). Xe
 trùng) và **Xuất danh sách đã lọc trùng - duy nhất** (1 dòng/người, kèm cột
 lịch sử khám nếu tích "Kèm cột lịch sử khám khi xuất") — đều xuất được ra
 Excel (.xlsx) hoặc CSV, không làm thay đổi CSDL (dùng để xem trước kết quả gộp
-trước khi thực sự gộp trong CSDL). Cả 2 file xuất đều có thêm các cột đánh
-dấu riêng cho từng nhóm bệnh (xem mục "Phân loại Nhóm bệnh không lây nhiễm"
-bên dưới), tương tự tab "Danh sách".
+trước khi thực sự gộp trong CSDL).
 
 Việc gộp/xóa hàng loạt đều tự động sao lưu CSDL trước khi thực hiện (xem tab
 "Nhập dữ liệu" → "Mở thư mục sao lưu" nếu cần khôi phục).
@@ -199,12 +192,6 @@ ra từ đó, dùng để lọc/thống kê theo từng loại bệnh.
 - Dữ liệu đã nhập từ trước khi có tính năng này (cột Nhóm bệnh còn trống)
   dùng nút **Xác định lại Nhóm bệnh (KLN)** ở tab "Nhập dữ liệu" để gán bù,
   không ghi đè các dòng đã có/đã sửa tay.
-- CSDL chỉ lưu 1 cột "benh" gộp (như trên) — cột này **không** bị đổi cấu
-  trúc. Các cột đánh dấu riêng theo từng nhóm (X/rỗng) chỉ được tách ra khi
-  hiển thị ở tab "Danh sách" và khi xuất Excel/CSV (tab "Danh sách" và tab
-  "Lọc trùng"), tính lại ngay từ cột "benh" mỗi lần hiển thị/xuất — không
-  cần chạy lại "Xác định lại Nhóm bệnh (KLN)" khi thêm nhóm bệnh mới, các
-  cột đánh dấu sẽ tự cập nhật theo danh mục hiện tại.
 - Danh mục nhóm bệnh hiện quản lý được định nghĩa trong `core.py` (biến
   `DISEASE_CATEGORIES`) — muốn thêm nhóm bệnh mới (ví dụ Bệnh thận mạn, Tim
   mạch...) thì sửa trực tiếp danh sách này (mã, nhãn hiển thị, danh sách từ
