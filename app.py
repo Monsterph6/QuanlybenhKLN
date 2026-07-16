@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Ung dung quan ly & loc trung danh sach benh nhan THA - giao dien PyQt6.
+Ung dung quan ly & loc trung danh sach benh nhan Benh khong lay nhiem (KLN:
+THA, dai thao duong, COPD/hen phe quan, ung thu...) - giao dien PyQt6.
 Tang du lieu (SQLite, doc Excel, xuat CSV/Excel) nam trong core.py.
 """
 import os
@@ -21,6 +22,8 @@ from core import (
     write_export, export_query_to_file,
     count_swapped_gender_birthdate, fix_swapped_gender_birthdate,
     count_unparsed_kham_dates, fix_unparsed_kham_dates,
+    count_unclassified_diseases, reclassify_diseases,
+    DISEASE_CATEGORIES, DISEASE_OTHER_LABEL,
     build_dedup_key, scan_dedup_groups, group_detail_rows,
     delete_patients_by_ids,
     merge_specific_ids, merge_group, merge_all_groups,
@@ -30,7 +33,7 @@ from core import (
     has_password, set_password, verify_password, remove_password,
     get_local_version, check_latest_release,
     load_lan_config, save_lan_config,
-    STATS_COLUMNS, stats_top_values, stats_birth_decade,
+    STATS_COLUMNS, stats_top_values, stats_birth_decade, stats_disease_counts,
 )
 
 
@@ -387,6 +390,10 @@ class ImportTab(QtWidgets.QWidget):
         fix_kham_btn = QtWidgets.QPushButton("Sửa lỗi định dạng Ngày khám bị bỏ sót")
         fix_kham_btn.clicked.connect(self.fix_kham_dates)
         row2.addWidget(fix_kham_btn)
+
+        reclassify_btn = QtWidgets.QPushButton("Xác định lại Nhóm bệnh (KLN)")
+        reclassify_btn.clicked.connect(self.reclassify_diseases_click)
+        row2.addWidget(reclassify_btn)
         row2.addStretch(1)
         layout.addLayout(row2)
 
@@ -527,6 +534,31 @@ class ImportTab(QtWidgets.QWidget):
         self.log_line(f"Đã tính lại Ngày khám cho {fixed:,} dòng.")
         self.main_window.on_data_changed()
 
+    def reclassify_diseases_click(self):
+        n = count_unclassified_diseases()
+        if n == 0:
+            QtWidgets.QMessageBox.information(
+                self, "Không có gì để xác định",
+                "Mọi dòng có Chẩn đoán đều đã được gán Nhóm bệnh (KLN).")
+            return
+        reply = QtWidgets.QMessageBox.question(
+            self, "Xác nhận",
+            f"Phát hiện {n:,} dòng có Chẩn đoán nhưng chưa được gán Nhóm bệnh "
+            "(thường là dữ liệu nhập từ trước khi có tính năng này).\n\n"
+            "Tự động dò từ khóa trong Chẩn đoán để gán Nhóm bệnh (Tăng huyết áp, "
+            "Đái tháo đường, COPD/Hen phế quản, Ung thư, hoặc 'Khác') cho các dòng đó? "
+            "Các dòng đã có Nhóm bệnh từ trước (kể cả do tự sửa tay) sẽ được GIỮ NGUYÊN, "
+            "không bị ghi đè. Một bản sao lưu sẽ được tạo tự động trước khi sửa.",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        backup_database(reason="truoc_khi_xac_dinh_nhom_benh")
+        updated = reclassify_diseases(overwrite=False)
+        self.log_line(f"Đã xác định Nhóm bệnh cho {updated:,} dòng.")
+        self.log_line("Lưu ý: đây là dò theo từ khóa, không thay thế chẩn đoán chuyên môn — "
+                       "xem lại và sửa tay ở tab 'Danh sách' nếu cần độ chính xác cao.")
+        self.main_window.on_data_changed()
+
     def export_quality_report(self):
         summary = data_quality_summary()
         if not any(n for _, n in summary):
@@ -601,6 +633,13 @@ class DataTab(QtWidgets.QWidget):
         self.gender_combo.currentIndexChanged.connect(lambda _: self.reload(reset_page=True))
         top.addWidget(self.gender_combo)
 
+        top.addWidget(QtWidgets.QLabel("Nhóm bệnh:"))
+        self.disease_combo = QtWidgets.QComboBox()
+        self.disease_combo.addItem("Tất cả")
+        self.disease_combo.addItems([label for _, label, _ in DISEASE_CATEGORIES] + [DISEASE_OTHER_LABEL])
+        self.disease_combo.currentIndexChanged.connect(lambda _: self.reload(reset_page=True))
+        top.addWidget(self.disease_combo)
+
         search_btn = QtWidgets.QPushButton("Tìm kiếm")
         search_btn.clicked.connect(lambda: self.reload(reset_page=True))
         top.addWidget(search_btn)
@@ -642,6 +681,10 @@ class DataTab(QtWidgets.QWidget):
         if g and g != "Tất cả":
             clauses.append("gioi_tinh = ?")
             params.append(g)
+        d = self.disease_combo.currentText()
+        if d and d != "Tất cả":
+            clauses.append("benh LIKE ?")
+            params.append(f"%{d}%")
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         return where, params
 
@@ -1316,6 +1359,10 @@ class SqlTab(QtWidgets.QWidget):
         "Top 20 chẩn đoán phổ biến":
             "SELECT chan_doan, COUNT(*) AS so_luong FROM patients "
             "GROUP BY chan_doan ORDER BY so_luong DESC LIMIT 20",
+        "Tổ hợp Nhóm bệnh (KLN) - theo bản ghi":
+            "SELECT benh, COUNT(*) AS so_luong FROM patients "
+            "WHERE TRIM(IFNULL(benh, '')) <> '' "
+            "GROUP BY benh ORDER BY so_luong DESC",
         "Thống kê theo năm sinh":
             "SELECT birth_year, COUNT(*) AS so_luong FROM patients "
             "WHERE birth_year IS NOT NULL GROUP BY birth_year ORDER BY birth_year",
@@ -1429,8 +1476,13 @@ class SqlTab(QtWidgets.QWidget):
 
 class StatsTab(QtWidgets.QWidget):
     # (nhan hien thi, cot CSDL hoac None cho "Nam sinh theo thap ky", kieu bieu do)
+    # Cot "__disease__" la gia tri dac biet, khong phai ten cot CSDL that -
+    # xem nhanh trong reload() ben duoi (dung stats_disease_counts() vi 1
+    # benh nhan co the thuoc nhieu nhom benh cung luc, khac voi cac cot
+    # thong ke thong thuong chi co 1 gia tri/dong).
     STAT_OPTIONS = [
         ("Giới tính", "gioi_tinh", "pie"),
+        ("Nhóm bệnh (KLN)", "__disease__", "bar"),
         ("Tỉnh/Thành phố", "tinh_tp", "bar"),
         ("Phường/Xã (top 20)", "phuong_xa", "bar"),
         ("Chẩn đoán (top 15)", "chan_doan", "bar"),
@@ -1487,6 +1539,8 @@ class StatsTab(QtWidgets.QWidget):
         label, column, kind = self.STAT_OPTIONS[self.type_combo.currentIndex()]
         if column is None:
             data = stats_birth_decade()
+        elif column == "__disease__":
+            data = stats_disease_counts()
         else:
             data = stats_top_values(column, limit=self.LIMITS.get(column, 50))
 
@@ -1671,7 +1725,7 @@ class UpdateCheckWorker(QtCore.QThread):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Quản lý & Lọc trùng danh sách bệnh nhân THA")
+        self.setWindowTitle("Quản lý & Lọc trùng danh sách bệnh nhân Bệnh không lây nhiễm (KLN)")
         self.resize(1280, 780)
 
         init_db()
