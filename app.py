@@ -23,7 +23,7 @@ from core import (
     count_swapped_gender_birthdate, fix_swapped_gender_birthdate,
     count_unparsed_kham_dates, fix_unparsed_kham_dates,
     count_unclassified_diseases, reclassify_diseases,
-    DISEASE_CATEGORIES, DISEASE_OTHER_LABEL,
+    DISEASE_CATEGORIES, DISEASE_OTHER_LABEL, with_disease_flag_columns,
     build_dedup_key, scan_dedup_groups, group_detail_rows,
     delete_patients_by_ids,
     merge_specific_ids, merge_group, merge_all_groups,
@@ -711,7 +711,9 @@ class DataTab(QtWidgets.QWidget):
         ).fetchall()
         conn.close()
 
-        self.model.set_data([label for _, label in COLUMNS], [tuple(r) for r in rows])
+        headers, disp_rows = with_disease_flag_columns(
+            [label for _, label in COLUMNS], [tuple(r) for r in rows])
+        self.model.set_data(headers, disp_rows)
 
         pages = max(1, (self.total + PAGE_SIZE - 1) // PAGE_SIZE)
         self.page_label.setText(f"Trang {self.page + 1}/{pages}   (tổng {self.total:,} bản ghi khớp bộ lọc)")
@@ -733,10 +735,15 @@ class DataTab(QtWidgets.QWidget):
             self, "Xuất dữ liệu", os.path.join(BASE_DIR, "danh_sach_loc.xlsx"), QT_EXPORT_FILTER)
         if not path:
             return
-        sql = f"SELECT {', '.join(c for c, _ in COLUMNS)} FROM patients {where} ORDER BY id"
-        headers = [label for _, label in COLUMNS]
+        conn = get_conn()
+        rows = conn.execute(
+            f"SELECT {', '.join(c for c, _ in COLUMNS)} FROM patients {where} ORDER BY id", params
+        ).fetchall()
+        conn.close()
+        headers, disp_rows = with_disease_flag_columns(
+            [label for _, label in COLUMNS], [tuple(r) for r in rows])
         try:
-            n = export_query_to_file(sql, params, path, headers=headers)
+            n = write_export(path, headers, disp_rows)
         except RuntimeError as e:
             QtWidgets.QMessageBox.critical(self, "Lỗi", str(e))
             return
@@ -1085,9 +1092,13 @@ class DedupTab(QtWidgets.QWidget):
             )
             ORDER BY {key_expr}, id
         """
-        headers = [label for _, label in COLUMNS]
+        conn = get_conn()
+        rows = conn.execute(sql).fetchall()
+        conn.close()
+        headers, disp_rows = with_disease_flag_columns(
+            [label for _, label in COLUMNS], [tuple(r) for r in rows])
         try:
-            n = export_query_to_file(sql, [], path, headers=headers)
+            n = write_export(path, headers, disp_rows)
         except RuntimeError as e:
             QtWidgets.QMessageBox.critical(self, "Lỗi", str(e))
             return
@@ -1105,8 +1116,9 @@ class DedupTab(QtWidgets.QWidget):
         if not path:
             return
         headers, rows = unique_rows_with_optional_history(key_expr, key_where, order, include_history)
+        headers, disp_rows = with_disease_flag_columns(headers, [tuple(r) for r in rows])
         try:
-            n = write_export(path, headers, (tuple(r) for r in rows))
+            n = write_export(path, headers, disp_rows)
         except RuntimeError as e:
             QtWidgets.QMessageBox.critical(self, "Lỗi", str(e))
             return
