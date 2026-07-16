@@ -4,7 +4,9 @@ Ung dung quan ly & loc trung danh sach benh nhan Benh khong lay nhiem (KLN:
 THA, dai thao duong, COPD/hen phe quan, ung thu...) - giao dien PyQt6.
 Tang du lieu (SQLite, doc Excel, xuat CSV/Excel) nam trong core.py.
 """
+import datetime
 import os
+import subprocess
 import sys
 import sqlite3
 
@@ -14,8 +16,16 @@ from PyQt6.QtCharts import (
     QBarCategoryAxis, QValueAxis,
 )
 
+try:
+    import win32service
+    import win32serviceutil
+    HAS_WIN32_SERVICE = True
+except ImportError:
+    HAS_WIN32_SERVICE = False
+
 import core
 import netclient
+import netserver
 from core import (
     BASE_DIR, DB_PATH, COLUMNS, DEDUP_FIELDS, PAGE_SIZE,
     get_conn, init_db, record_count, import_excel,
@@ -35,6 +45,13 @@ from core import (
     load_lan_config, save_lan_config,
     STATS_COLUMNS, stats_top_values, stats_birth_decade, stats_disease_counts,
 )
+
+
+# Ten Windows Service dung o vai tro May chu - phai khop dung
+# service.QuanLyBenhNhanTHAService._svc_name_. Khai bao lai truc tiep (thay
+# vi import service.py) de tranh keo theo pywin32.ServiceFramework ngay tu
+# dau chuong trinh chinh - chi ServerTab (o duoi) moi thuc su can pywin32.
+SERVER_SERVICE_NAME = "QuanLyBenhNhanTHA_Server"
 
 
 def restart_app():
@@ -1703,6 +1720,252 @@ class NetworkTab(QtWidgets.QWidget):
             restart_app()
 
 
+class ServerTab(QtWidgets.QWidget):
+    """Quan ly may chu chia se mang LAN ngay trong ung dung chinh - chi hien
+    khi may nay duoc cai voi vai tro "May chu" (lan_config.json co "port").
+    Goi qua HTTP toi chinh Windows Service dang chay tren 127.0.0.1 (cac op
+    "admin_*" cua netserver.py) - dung lai dung ham netclient.admin_* ma
+    server_tray.py da dung, chi khac giao dien (PyQt6 thay vi tkinter) de
+    khong bat buoc phai mo tray rieng moi xem/quan ly duoc."""
+
+    REFRESH_MS = 10_000
+
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        cfg = load_lan_config()
+        self.port = cfg.get("port", 8765)
+        self._session_by_row = {}
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        title = QtWidgets.QLabel("Quản lý máy chủ chia sẻ mạng LAN")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        status_row = QtWidgets.QHBoxLayout()
+        self.status_label = QtWidgets.QLabel()
+        status_row.addWidget(self.status_label, stretch=1)
+        self.start_btn = QtWidgets.QPushButton("Bật chia sẻ")
+        self.start_btn.clicked.connect(self.start_service)
+        status_row.addWidget(self.start_btn)
+        self.stop_btn = QtWidgets.QPushButton("Dừng chia sẻ")
+        self.stop_btn.clicked.connect(self.stop_service)
+        status_row.addWidget(self.stop_btn)
+        layout.addLayout(status_row)
+
+        addr_row = QtWidgets.QHBoxLayout()
+        addr_row.addWidget(QtWidgets.QLabel("Địa chỉ cung cấp cho máy trạm:"))
+        self.addr_edit = QtWidgets.QLineEdit()
+        self.addr_edit.setReadOnly(True)
+        addr_row.addWidget(self.addr_edit, stretch=1)
+        copy_btn = QtWidgets.QPushButton("Sao chép")
+        copy_btn.clicked.connect(self.copy_address)
+        addr_row.addWidget(copy_btn)
+        open_btn = QtWidgets.QPushButton("Mở trong trình duyệt")
+        open_btn.clicked.connect(self.open_address)
+        addr_row.addWidget(open_btn)
+        layout.addLayout(addr_row)
+
+        if not HAS_WIN32_SERVICE:
+            warn = QtWidgets.QLabel(
+                "Không tìm thấy thư viện pywin32 trên máy này — chỉ xem được trạng thái/kết "
+                "nối, không bật/dừng được dịch vụ từ tab này (dùng Windows Services "
+                "(services.msc) hoặc biểu tượng khay hệ thống thay thế).")
+            warn.setWordWrap(True)
+            layout.addWidget(warn)
+            self.start_btn.setEnabled(False)
+            self.stop_btn.setEnabled(False)
+
+        conn_title = QtWidgets.QLabel("Kết nối đang hoạt động")
+        conn_title.setObjectName("SectionTitle")
+        layout.addWidget(conn_title)
+
+        self.conn_table = QtWidgets.QTableWidget(0, 3)
+        self.conn_table.setHorizontalHeaderLabels(["Địa chỉ IP", "Kết nối lúc", "Rảnh (giây)"])
+        self.conn_table.horizontalHeader().setStretchLastSection(True)
+        self.conn_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self.conn_table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.conn_table.setMaximumHeight(180)
+        layout.addWidget(self.conn_table)
+
+        conn_btn_row = QtWidgets.QHBoxLayout()
+        refresh_btn = QtWidgets.QPushButton("Làm mới")
+        refresh_btn.clicked.connect(self.refresh_connections)
+        conn_btn_row.addWidget(refresh_btn)
+        disconnect_btn = QtWidgets.QPushButton("Ngắt kết nối đã chọn")
+        disconnect_btn.clicked.connect(self.disconnect_selected)
+        conn_btn_row.addWidget(disconnect_btn)
+        conn_btn_row.addStretch(1)
+        layout.addLayout(conn_btn_row)
+
+        acl_title = QtWidgets.QLabel("Giới hạn IP được phép kết nối (whitelist)")
+        acl_title.setObjectName("SectionTitle")
+        layout.addWidget(acl_title)
+
+        self.acl_group = QtWidgets.QButtonGroup(self)
+        self.rb_allow_all = QtWidgets.QRadioButton("Cho phép tất cả IP trong mạng LAN (mặc định)")
+        self.rb_whitelist = QtWidgets.QRadioButton("Chỉ cho phép các IP trong danh sách dưới đây")
+        for rb in (self.rb_allow_all, self.rb_whitelist):
+            self.acl_group.addButton(rb)
+            layout.addWidget(rb)
+
+        acl_row = QtWidgets.QHBoxLayout()
+        self.acl_list = QtWidgets.QListWidget()
+        self.acl_list.setMaximumHeight(100)
+        acl_row.addWidget(self.acl_list, stretch=1)
+        acl_btns = QtWidgets.QVBoxLayout()
+        self.acl_ip_edit = QtWidgets.QLineEdit()
+        self.acl_ip_edit.setPlaceholderText("vd: 192.168.1.11")
+        self.acl_ip_edit.returnPressed.connect(self.add_acl_ip)
+        acl_btns.addWidget(self.acl_ip_edit)
+        add_ip_btn = QtWidgets.QPushButton("Thêm IP")
+        add_ip_btn.clicked.connect(self.add_acl_ip)
+        acl_btns.addWidget(add_ip_btn)
+        remove_ip_btn = QtWidgets.QPushButton("Xóa IP đã chọn")
+        remove_ip_btn.clicked.connect(self.remove_acl_ip)
+        acl_btns.addWidget(remove_ip_btn)
+        acl_btns.addStretch(1)
+        acl_row.addLayout(acl_btns)
+        layout.addLayout(acl_row)
+
+        save_acl_btn = QtWidgets.QPushButton("Lưu danh sách IP")
+        save_acl_btn.setObjectName("PrimaryButton")
+        save_acl_btn.clicked.connect(self.save_acl)
+        layout.addWidget(save_acl_btn, alignment=QtCore.Qt.AlignmentFlag.AlignLeft)
+
+        layout.addStretch(1)
+
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self.refresh_status)
+        self.timer.start(self.REFRESH_MS)
+
+        self.refresh_status()
+        self.refresh_connections()
+        self.load_acl()
+
+    def _base_url(self):
+        return f"http://127.0.0.1:{self.port}"
+
+    def service_status(self):
+        if not HAS_WIN32_SERVICE:
+            return "unknown"
+        try:
+            status = win32serviceutil.QueryServiceStatus(SERVER_SERVICE_NAME)[1]
+        except Exception:
+            return "unknown"
+        return "running" if status == win32service.SERVICE_RUNNING else "stopped"
+
+    def refresh_status(self):
+        st = self.service_status()
+        ip = netserver.get_local_ip()
+        self.addr_edit.setText(f"http://{ip}:{self.port}")
+        if st == "running":
+            self.status_label.setText("● Dịch vụ đang CHIA SẺ dữ liệu.")
+        elif st == "stopped":
+            self.status_label.setText("● Dịch vụ đang DỪNG.")
+        else:
+            self.status_label.setText("● Không rõ trạng thái dịch vụ (chưa cài đặt, hoặc thiếu pywin32).")
+        self.refresh_connections()
+
+    def start_service(self):
+        try:
+            win32serviceutil.StartService(SERVER_SERVICE_NAME)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Không bật được dịch vụ",
+                f"{e}\n\nCó thể cần chạy ứng dụng với quyền Administrator.")
+        self.refresh_status()
+
+    def stop_service(self):
+        try:
+            win32serviceutil.StopService(SERVER_SERVICE_NAME)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Không dừng được dịch vụ",
+                f"{e}\n\nCó thể cần chạy ứng dụng với quyền Administrator.")
+        self.refresh_status()
+
+    def copy_address(self):
+        QtWidgets.QApplication.clipboard().setText(self.addr_edit.text())
+
+    def open_address(self):
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.addr_edit.text()))
+
+    def refresh_connections(self):
+        api_key = core.get_lan_api_key()
+        try:
+            conns = netclient.admin_list_connections(self._base_url(), api_key)
+        except Exception:
+            self.conn_table.setRowCount(0)
+            self._session_by_row = {}
+            return
+        self.conn_table.setRowCount(len(conns))
+        self._session_by_row = {}
+        for row, c in enumerate(conns):
+            since = datetime.datetime.fromtimestamp(c["connected_at"]).strftime("%H:%M:%S %d/%m/%Y")
+            self.conn_table.setItem(row, 0, QtWidgets.QTableWidgetItem(c["ip"]))
+            self.conn_table.setItem(row, 1, QtWidgets.QTableWidgetItem(since))
+            self.conn_table.setItem(row, 2, QtWidgets.QTableWidgetItem(str(c["idle_seconds"])))
+            self._session_by_row[row] = c["session_id"]
+
+    def disconnect_selected(self):
+        rows = sorted({idx.row() for idx in self.conn_table.selectedIndexes()})
+        if not rows:
+            return
+        api_key = core.get_lan_api_key()
+        for row in rows:
+            sid = self._session_by_row.get(row)
+            if not sid:
+                continue
+            try:
+                netclient.admin_disconnect(self._base_url(), api_key, session_id=sid)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Lỗi", f"Không ngắt được kết nối:\n{e}")
+                return
+        self.refresh_connections()
+
+    def load_acl(self):
+        api_key = core.get_lan_api_key()
+        try:
+            cfg = netclient.admin_get_acl(self._base_url(), api_key)
+        except Exception:
+            cfg = {"mode": "allow_all", "allowed_ips": []}
+        (self.rb_whitelist if cfg.get("mode") == "whitelist" else self.rb_allow_all).setChecked(True)
+        self.acl_list.clear()
+        for ip in cfg.get("allowed_ips") or []:
+            self.acl_list.addItem(ip)
+
+    def add_acl_ip(self):
+        ip = self.acl_ip_edit.text().strip()
+        if ip:
+            self.acl_list.addItem(ip)
+            self.acl_ip_edit.clear()
+
+    def remove_acl_ip(self):
+        for item in self.acl_list.selectedItems():
+            self.acl_list.takeItem(self.acl_list.row(item))
+
+    def save_acl(self):
+        mode = "whitelist" if self.rb_whitelist.isChecked() else "allow_all"
+        allowed_ips = [self.acl_list.item(i).text() for i in range(self.acl_list.count())]
+        if mode == "whitelist" and not allowed_ips:
+            QtWidgets.QMessageBox.warning(
+                self, "Thiếu IP",
+                "Danh sách IP đang trống - nếu lưu ở chế độ này, KHÔNG máy trạm nào "
+                "kết nối được (trừ chính máy chủ). Thêm ít nhất 1 IP hoặc chọn "
+                "\"Cho phép tất cả IP\".")
+            return
+        api_key = core.get_lan_api_key()
+        try:
+            netclient.admin_set_acl(self._base_url(), api_key, mode=mode, allowed_ips=allowed_ips)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Lỗi", f"Không lưu được cấu hình:\n{e}")
+            return
+        QtWidgets.QMessageBox.information(self, "Đã lưu", "Đã cập nhật danh sách IP được phép.")
+
+
 # ------------------------------------------------------------------
 # Cua so chinh
 # ------------------------------------------------------------------
@@ -1729,6 +1992,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.resize(1280, 780)
 
         init_db()
+        self._build_menu_bar()
 
         central = QtWidgets.QWidget()
         central_layout = QtWidgets.QVBoxLayout(central)
@@ -1762,6 +2026,14 @@ class MainWindow(QtWidgets.QMainWindow):
         tabs.addTab(self.sql_tab, "Truy vấn SQL")
         tabs.addTab(self.stats_tab, "Thống kê")
         tabs.addTab(self.network_tab, "Mạng LAN")
+
+        # Tab "Máy chủ" chi hien khi may nay duoc cai voi vai tro May chu
+        # (lan_config.json co "port") - xem setup.iss.
+        self.server_tab = None
+        if load_lan_config().get("port"):
+            self.server_tab = ServerTab(self)
+            tabs.addTab(self.server_tab, "Máy chủ")
+
         central_layout.addWidget(tabs)
         self.setCentralWidget(central)
 
@@ -1791,6 +2063,104 @@ class MainWindow(QtWidgets.QMainWindow):
             f"Có bản cập nhật mới: v{remote_version}. Mở Start Menu → \"Kiểm tra cập nhật\" "
             "(hoặc chạy update.bat trong thư mục cài đặt) để cập nhật.")
         self.update_banner.setVisible(True)
+
+    # ------------------------------------------------------------------
+    # Thanh menu "Trợ giúp": kiểm tra/chạy cập nhật, hướng dẫn sử dụng.
+    # ------------------------------------------------------------------
+
+    def _build_menu_bar(self):
+        help_menu = self.menuBar().addMenu("&Trợ giúp")
+
+        check_update_action = QtGui.QAction("Kiểm tra cập nhật ngay", self)
+        check_update_action.triggered.connect(self.check_update_now)
+        help_menu.addAction(check_update_action)
+
+        run_update_action = QtGui.QAction("Chạy cập nhật (update.bat)", self)
+        run_update_action.triggered.connect(self.run_update_script)
+        help_menu.addAction(run_update_action)
+
+        help_menu.addSeparator()
+
+        readme_action = QtGui.QAction("Hướng dẫn sử dụng (README)", self)
+        readme_action.triggered.connect(self.open_readme)
+        help_menu.addAction(readme_action)
+
+        about_action = QtGui.QAction("Giới thiệu", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+
+    def check_update_now(self):
+        self.setCursor(QtCore.Qt.CursorShape.WaitCursor)
+        try:
+            local = get_local_version()
+            remote, _url = check_latest_release()
+        finally:
+            self.unsetCursor()
+
+        if not remote:
+            QtWidgets.QMessageBox.information(
+                self, "Kiểm tra cập nhật",
+                "Không kiểm tra được (không có mạng, hoặc chưa có bản phát hành nào).")
+            return
+
+        remote_clean = remote.lstrip("vV")
+        if local and remote_clean == local:
+            QtWidgets.QMessageBox.information(
+                self, "Kiểm tra cập nhật", f"Bạn đang dùng bản mới nhất (v{local}).")
+            return
+
+        reply = QtWidgets.QMessageBox.question(
+            self, "Có bản cập nhật mới",
+            f"Phiên bản hiện tại: v{local or '?'}\nPhiên bản mới nhất: v{remote_clean}\n\n"
+            "Chạy cập nhật ngay bây giờ?",
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
+        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.run_update_script()
+
+    def run_update_script(self):
+        update_bat = os.path.join(BASE_DIR, "update.bat")
+        if not os.path.exists(update_bat):
+            QtWidgets.QMessageBox.warning(
+                self, "Không tìm thấy update.bat",
+                "Chỉ dùng được khi cài từ bộ cài đặt (Setup.exe) — không có khi chạy trực "
+                "tiếp từ mã nguồn.")
+            return
+
+        is_server = bool(load_lan_config().get("port"))
+        try:
+            if sys.platform == "win32":
+                # Vai tro May chu can quyen Administrator de dung/bat lai
+                # Windows Service khi cap nhat - xem update.ps1.
+                os.startfile(update_bat, "runas" if is_server else "open")
+            else:
+                subprocess.Popen(["bash", update_bat])
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Lỗi", f"Không chạy được update.bat:\n{e}")
+            return
+
+        QtWidgets.QMessageBox.information(
+            self, "Đang cập nhật",
+            "Đã mở cửa sổ cập nhật (update.bat). Làm theo hướng dẫn trong cửa sổ đó, "
+            "sau đó mở lại ứng dụng.")
+
+    def open_readme(self):
+        readme = os.path.join(BASE_DIR, "README.md")
+        if os.path.exists(readme):
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(readme))
+        else:
+            QtWidgets.QMessageBox.information(
+                self, "Không tìm thấy README.md",
+                "File hướng dẫn không có trong thư mục cài đặt.")
+
+    def show_about(self):
+        local = get_local_version() or "?"
+        QtWidgets.QMessageBox.about(
+            self, "Giới thiệu",
+            "<b>Quản lý &amp; Lọc trùng danh sách bệnh nhân THA</b><br>"
+            f"Phiên bản: v{local}<br>"
+            "Nhà phát triển: Monsterph6<br>"
+            "<a href='https://github.com/Monsterph6/QuanlybenhKLN'>"
+            "github.com/Monsterph6/QuanlybenhKLN</a>")
 
 
 STYLE_SHEET = """

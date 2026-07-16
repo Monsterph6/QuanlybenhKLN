@@ -34,7 +34,7 @@ PASSWORD_FILE = os.path.join(BASE_DIR, "app_password.hash")
 VERSION_FILE = os.path.join(BASE_DIR, "VERSION.txt")
 UPDATE_TOKEN_FILE = os.path.join(BASE_DIR, "update_token.txt")
 GITHUB_OWNER = "Monsterph6"
-GITHUB_REPO = "quanlybenhnhantha"
+GITHUB_REPO = "QuanlybenhKLN"
 
 COLUMNS = [
     ("id", "ID"),
@@ -1103,11 +1103,9 @@ def check_latest_release(timeout=5, tag_prefix="v"):
     mang, repo chua co release phu hop...). Khong bao gio raise loi - danh
     cho kiem tra nen, khong duoc lam gian doan app.
 
-    Ung dung may tram (app.py) va goi may chu (service.py/server_tray.py)
-    dung chung 1 repo Release nhung 2 dong phien ban tach rieng bang tien
-    to tag: "vX.Y.Z" cho may tram (tag_prefix mac dinh "v"), "server-vX.Y.Z"
-    cho may chu (goi voi tag_prefix="server-v"). Dung /releases (danh sach)
-    thay vi /releases/latest de loc dung dong phien ban can, vi
+    Chi con 1 dong phien ban duy nhat (tag "vX.Y.Z", dung chung cho ca ung
+    dung chinh lan thanh phan May chu - xem setup.iss). Dung /releases
+    (danh sach) thay vi /releases/latest de loc dung tien to tag can, vi
     /releases/latest tra ve release moi nhat theo thoi gian bat ke tag nao.
 
     Token la tuy chon - chi can neu repo dang o che do Private (xem

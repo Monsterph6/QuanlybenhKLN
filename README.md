@@ -46,6 +46,12 @@ hoàn toàn offline, không gửi dữ liệu ra ngoài.
 
 ## Các chức năng
 
+Ở góc trên cùng cửa sổ có thanh menu **"Trợ giúp"**: **Kiểm tra cập nhật
+ngay** (hỏi GitHub Releases ngay lập tức, không chờ kiểm tra ngầm lúc mở
+app), **Chạy cập nhật (update.bat)** (mở luôn cửa sổ cập nhật — tự xin quyền
+Administrator nếu máy đang ở vai trò Máy chủ), **Hướng dẫn sử dụng (README)**
+và **Giới thiệu** (xem phiên bản hiện tại).
+
 ### 1. Tab "Nhập dữ liệu"
 - Chọn file Excel (`.xlsx`) và bấm **Nhập vào cơ sở dữ liệu**.
 - Ứng dụng tự dò cột theo tiêu đề "Họ và tên" nên vẫn nhập đúng dù có vài dòng
@@ -224,6 +230,25 @@ giới hạn phía máy trạm chỉ cho gõ `SELECT`, nhưng máy chủ không 
 điều đó). Chỉ dùng tính năng này trong mạng nội bộ đáng tin cậy (không có
 Wi-Fi khách lạ dùng chung).
 
+### 7. Tab "Máy chủ" (chỉ hiện với vai trò Máy chủ)
+
+Chỉ xuất hiện trên máy được cài với vai trò **Máy chủ** (xem mục "Máy chủ chia
+sẻ mạng LAN" bên dưới) — cho phép quản lý việc chia sẻ dữ liệu ngay trong ứng
+dụng chính, không bắt buộc phải mở thêm biểu tượng khay hệ thống
+(`QuanLyBenhNhanTHA-Tray.exe`) nữa (dù vẫn dùng song song được, cả 2 đều gọi
+chung 1 API quản trị của Windows Service):
+
+- **Trạng thái & địa chỉ**: hiện dịch vụ đang chia sẻ hay đang dừng, địa chỉ
+  `http://IP:cổng` để cung cấp cho các máy trạm (nút **Sao chép** / **Mở
+  trong trình duyệt**), cùng 2 nút **Bật chia sẻ** / **Dừng chia sẻ** (cần
+  thư viện `pywin32` và có thể cần quyền Administrator).
+- **Kết nối đang hoạt động**: danh sách các máy trạm đang kết nối (IP, thời
+  điểm kết nối, số giây đang rảnh) — chọn 1 dòng rồi bấm **Ngắt kết nối đã
+  chọn** để buộc đóng phiên đó ngay lập tức. Tự làm mới mỗi 10 giây.
+- **Giới hạn IP được phép kết nối (whitelist)**: giống hệt chức năng trong
+  tray — mặc định cho phép mọi IP trong mạng LAN, có thể chuyển sang chỉ cho
+  phép các IP trong danh sách rồi bấm **Lưu danh sách IP**.
+
 ## Máy chủ chia sẻ mạng LAN
 
 Khi nhiều máy trong cùng một trạm y tế cần dùng chung 1 CSDL, **một máy** (máy
@@ -276,7 +301,10 @@ lại trình cài đặt và chọn vai trò mới.
 
 ### Quản lý kết nối & giới hạn IP (whitelist)
 
-Chuột phải icon tray của máy chủ (`server_tray.py` / `QuanLyBenhNhanTHA-Tray.exe`):
+Có 2 cách tương đương (cùng gọi 1 API quản trị của Windows Service, dùng cách
+nào cũng được) — tab **"Máy chủ"** ngay trong ứng dụng chính (xem mục 7 ở
+trên), hoặc chuột phải icon tray của máy chủ (`server_tray.py` /
+`QuanLyBenhNhanTHA-Tray.exe`):
 
 - **"Kết nối đang hoạt động..."** — hiện danh sách các máy trạm đang kết nối
   (địa chỉ IP, thời điểm kết nối, số giây đang rảnh). Chọn 1 dòng rồi bấm
