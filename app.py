@@ -2018,21 +2018,26 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dedup_tab = DedupTab(self)
         self.sql_tab = SqlTab(self)
         self.stats_tab = StatsTab(self)
-        self.network_tab = NetworkTab(self)
 
         tabs.addTab(self.import_tab, "Nhập dữ liệu")
         tabs.addTab(self.data_tab, "Danh sách")
         tabs.addTab(self.dedup_tab, "Lọc trùng")
         tabs.addTab(self.sql_tab, "Truy vấn SQL")
         tabs.addTab(self.stats_tab, "Thống kê")
-        tabs.addTab(self.network_tab, "Mạng LAN")
 
-        # Tab "Máy chủ" chi hien khi may nay duoc cai voi vai tro May chu
-        # (lan_config.json co "port") - xem setup.iss.
+        # May duoc cai vai tro May chu (lan_config.json co "port") luon doc/
+        # ghi CSDL cuc bo cua chinh no ("role": "single") - khong can chon gi
+        # o tab "Mạng LAN" nua (khong co gi de chon: khong the tu ket noi toi
+        # chinh minh qua mang, va cung khong the doi sang vai tro khac tu
+        # trong app). Thay tab do bang tab "Máy chủ" (quan ly viec chia se).
+        self.network_tab = None
         self.server_tab = None
         if load_lan_config().get("port"):
             self.server_tab = ServerTab(self)
             tabs.addTab(self.server_tab, "Máy chủ")
+        else:
+            self.network_tab = NetworkTab(self)
+            tabs.addTab(self.network_tab, "Mạng LAN")
 
         central_layout.addWidget(tabs)
         self.setCentralWidget(central)

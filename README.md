@@ -207,13 +207,17 @@ ra từ đó, dùng để lọc/thống kê theo từng loại bệnh.
   mạch...) thì sửa trực tiếp danh sách này (mã, nhãn hiển thị, danh sách từ
   khóa không dấu) rồi chạy lại "Xác định lại Nhóm bệnh (KLN)".
 
-### 6. Tab "Mạng LAN"
+### 6. Tab "Mạng LAN" (ẩn trên máy có vai trò Máy chủ)
 
 Dùng khi máy này cần dùng chung dữ liệu với 1 **máy chủ** đã có sẵn trong cùng
 mạng LAN nội bộ (xem mục "Máy chủ chia sẻ mạng LAN" bên dưới). Tab này chỉ hỗ
-trợ đổi qua lại giữa 2 vai trò **Một máy** ↔ **Máy trạm**; vai trò **Máy chủ**
-chỉ chọn được lúc cài đặt (xem mục bên dưới) — máy đang chạy vai trò Máy chủ
-sẽ không đổi được vai trò trong tab này, muốn đổi thì chạy lại trình cài đặt.
+trợ đổi qua lại giữa 2 vai trò **Một máy** ↔ **Máy trạm**.
+
+Máy được cài với vai trò **Máy chủ** sẽ **không có tab này** — vì bản thân nó
+luôn đọc/ghi trực tiếp CSDL cục bộ của chính mình (không có gì để "chọn kết
+nối tới" ở đây), và cũng không đổi được sang vai trò khác ngay trong ứng dụng
+(muốn đổi vai trò thì chạy lại trình cài đặt). Tab "Mạng LAN" được thay bằng
+tab **"Máy chủ"** (mục 7 bên dưới) để quản lý việc chia sẻ thay vì để trống.
 
 - **Một máy (mặc định)**: hoạt động độc lập như trước đây, không chia sẻ.
 - **Máy trạm**: nhập đúng địa chỉ máy chủ (bấm **Kiểm tra kết nối** để thử
@@ -230,11 +234,12 @@ giới hạn phía máy trạm chỉ cho gõ `SELECT`, nhưng máy chủ không 
 điều đó). Chỉ dùng tính năng này trong mạng nội bộ đáng tin cậy (không có
 Wi-Fi khách lạ dùng chung).
 
-### 7. Tab "Máy chủ" (chỉ hiện với vai trò Máy chủ)
+### 7. Tab "Máy chủ" (thay cho tab "Mạng LAN", chỉ hiện với vai trò Máy chủ)
 
 Chỉ xuất hiện trên máy được cài với vai trò **Máy chủ** (xem mục "Máy chủ chia
-sẻ mạng LAN" bên dưới) — cho phép quản lý việc chia sẻ dữ liệu ngay trong ứng
-dụng chính, không bắt buộc phải mở thêm biểu tượng khay hệ thống
+sẻ mạng LAN" bên dưới), thay thế hẳn cho tab "Mạng LAN" (không có cả 2 tab
+cùng lúc) — cho phép quản lý việc chia sẻ dữ liệu ngay trong ứng dụng chính,
+không bắt buộc phải mở thêm biểu tượng khay hệ thống
 (`QuanLyBenhNhanTHA-Tray.exe`) nữa (dù vẫn dùng song song được, cả 2 đều gọi
 chung 1 API quản trị của Windows Service):
 
