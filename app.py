@@ -546,7 +546,7 @@ class ImportTab(QtWidgets.QWidget):
             f"Phát hiện {n:,} dòng có Chẩn đoán nhưng chưa được gán Nhóm bệnh "
             "(thường là dữ liệu nhập từ trước khi có tính năng này).\n\n"
             "Tự động dò từ khóa trong Chẩn đoán để gán Nhóm bệnh (Tăng huyết áp, "
-            "Đái tháo đường, COPD/Hen phế quản, Ung thư, hoặc 'Khác') cho các dòng đó? "
+            "Đái tháo đường, COPD/Hen phế quản, Ung thư, Tâm thần, hoặc 'Khác') cho các dòng đó? "
             "Các dòng đã có Nhóm bệnh từ trước (kể cả do tự sửa tay) sẽ được GIỮ NGUYÊN, "
             "không bị ghi đè. Một bản sao lưu sẽ được tạo tự động trước khi sửa.",
             QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No)
